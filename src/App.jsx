@@ -24,16 +24,11 @@ const firebaseConfig = {
 
 // Initialize Firebase Services
 const app = initializeApp(firebaseConfig);
-<<<<<<< HEAD
 const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
-=======
-const auth = getAuth(app);
-const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default';
->>>>>>> cf71e09bf74e9ed51bbd745c379143414b324f3d
 
 // Default Dashboard Data (Fallback if database is empty)
 const DEFAULT_PROJECT_INFO = {
