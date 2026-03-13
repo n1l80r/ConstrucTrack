@@ -8,7 +8,7 @@ import {
   Users, HardHat, FileText, ChevronRight, Activity, Clock, 
   CheckCircle2, AlertCircle, Download, Camera, Send
 } from 'lucide-react';
-npm install firebase
+
 
 // --- Firebase Initialization ---
 const firebaseConfig = {
