@@ -249,7 +249,7 @@ export default function App() {
           <div className="flex justify-center mb-6">
             <div className="bg-blue-600 p-3 rounded-xl"><HardHat size={40} className="text-white" /></div>
           </div>
-          <h1 className="text-3xl font-bold text-center mb-2">ConstrucTrack</h1>
+          <h1 className="text-3xl font-bold text-center mb-2">NMICTrack</h1>
           <p className="text-slate-400 text-center mb-8">Enterprise Project Portal</p>
 
           {!role ? (
