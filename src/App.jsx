@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, getDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { getAnalytics } from 'firebase/analytics';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   LayoutDashboard, Image as ImageIcon, MessageSquare, FolderKanban, 
   Settings, Bell, Search, Menu, X, Upload, ShieldCheck, 
   Users, HardHat, FileText, ChevronRight, Activity, Clock, 
-  CheckCircle2, AlertCircle, Download, Camera, Send
+  CheckCircle2, AlertCircle, Download, Camera, Send, Edit3, Save, Plus, Trash2
 } from 'lucide-react';
 
-
-// --- Firebase Initialization ---
+// --- Firebase Initialization (Using Your Keys) ---
 const firebaseConfig = {
   apiKey: "AIzaSyBdpQP96Hs4meZUeaeur8ycKjHH0rdIoV8",
   authDomain: "nmic-3dd2b.firebaseapp.com",
@@ -21,19 +22,25 @@ const firebaseConfig = {
   measurementId: "G-TG9J09PZ9H"
 };
 
-// Initialize Firebase
+// Initialize Firebase Services
 const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
 
-// --- Mock Data Generators for Demo Purposes ---
-const MOCK_PHOTOS = [
-  "https://images.unsplash.com/photo-1541888086425-d81bb19240f5?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1504307651254-35680f356f90?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1589939705384-5185137a7f0f?auto=format&fit=crop&w=800&q=80"
-];
-
-// --- Components ---
+// Default Dashboard Data (Fallback if database is empty)
+const DEFAULT_PROJECT_INFO = {
+  budget: "$4.2M",
+  budgetTotal: "$5.0M",
+  openRFIs: "12",
+  rfiSubtext: "3 urgent",
+  milestones: [
+    { id: 1, title: "Foundation Pour", status: "completed", date: "Oct 15, 2025", progress: 100 },
+    { id: 2, title: "Structural Steel Erection", status: "in-progress", date: "Current Phase - 60%", progress: 60 },
+    { id: 3, title: "Envelope & Glazing", status: "upcoming", date: "Dec 01, 2025", progress: 0 }
+  ]
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -41,7 +48,7 @@ export default function App() {
   const [is2FAVerified, setIs2FAVerified] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // --- New Login State ---
+  // Login State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -55,28 +62,15 @@ export default function App() {
   const [photos, setPhotos] = useState([]);
   const [messages, setMessages] = useState([]);
   const [files, setFiles] = useState([]);
+  const [projectInfo, setProjectInfo] = useState(DEFAULT_PROJECT_INFO);
   const [notifications, setNotifications] = useState([]);
 
   // 1. Auth & Initialization
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth Error:", error);
-      }
-    };
-    initAuth();
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
@@ -84,42 +78,52 @@ export default function App() {
   useEffect(() => {
     if (!user || !is2FAVerified || !role) return;
 
-    const photosRef = collection(db, 'artifacts', appId, 'public', 'data', 'photos');
-    const messagesRef = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
-    const filesRef = collection(db, 'artifacts', appId, 'public', 'data', 'files');
+    // References to Root Collections
+    const photosRef = collection(db, 'photos');
+    const messagesRef = collection(db, 'messages');
+    const filesRef = collection(db, 'files');
+    const projectInfoRef = doc(db, 'project_info', 'main');
 
+    // Subscribe to Data
     const unsubPhotos = onSnapshot(photosRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       setPhotos(data);
-    }, console.error);
+    });
 
     const unsubMessages = onSnapshot(messagesRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       data.sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
       setMessages(data);
-    }, console.error);
+    });
 
     const unsubFiles = onSnapshot(filesRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       setFiles(data);
-    }, console.error);
+    });
+
+    const unsubProjectInfo = onSnapshot(projectInfoRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setProjectInfo(docSnap.data());
+      } else {
+        // If it doesn't exist yet, save the defaults to the database
+        setDoc(projectInfoRef, DEFAULT_PROJECT_INFO);
+      }
+    });
 
     return () => {
       unsubPhotos();
       unsubMessages();
       unsubFiles();
+      unsubProjectInfo();
     };
   }, [user, is2FAVerified, role]);
 
-  // Toast Notification Simulator
   const triggerNotification = (title, message) => {
     const newNotif = { id: Date.now(), title, message };
     setNotifications(prev => [newNotif, ...prev]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== newNotif.id));
-    }, 4000);
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== newNotif.id)), 4000);
   };
 
   // --- Handlers ---
@@ -127,18 +131,14 @@ export default function App() {
     e.preventDefault();
     setLoginError('');
     try {
-      // 1. Authenticate with Firebase Email/Password
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      
-      // 2. Look up their role securely in Firestore
       const userDocRef = doc(db, 'users', userCredential.user.uid);
       const userDoc = await getDoc(userDocRef);
       
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        setRole(userData.role); // Sets to 'admin' or 'contractor'
+        setRole(userData.role); 
         
-        // Simulate 2FA Delay
         setTimeout(() => {
           setIs2FAVerified(true);
           if (userData.role === 'contractor') setCurrentView('photos');
@@ -153,15 +153,6 @@ export default function App() {
     }
   };
 
-  const handleLogin = (selectedRole) => {
-    setRole(selectedRole);
-    // Simulate 2FA Flow
-    setTimeout(() => {
-      setIs2FAVerified(true);
-      if (selectedRole === 'contractor') setCurrentView('photos'); // Contractors default to photos/files
-    }, 1500);
-  };
-
   const handleLogout = async () => {
     await signOut(auth);
     setRole(null);
@@ -169,52 +160,77 @@ export default function App() {
     setCurrentView('dashboard');
   };
 
+  // --- REAL DATA MUTATIONS ---
+  const saveProjectInfo = async (newInfo) => {
+    try {
+      await setDoc(doc(db, 'project_info', 'main'), newInfo);
+      triggerNotification("Success", "Dashboard has been updated live.");
+    } catch (err) {
+      console.error("Error saving dashboard:", err);
+      triggerNotification("Error", "Could not save dashboard data.");
+    }
+  };
+
   const addMessage = async (text, portalThread) => {
     if (!text.trim()) return;
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+      await addDoc(collection(db, 'messages'), {
         text,
         authorId: user.uid,
+        authorEmail: user.email || 'Unknown User', // Added Email Tagging
         authorRole: role,
-        portalThread, // 'admin' or 'contractor'
+        portalThread, 
         createdAt: serverTimestamp()
       });
-      triggerNotification("New Message", `Posted to ${portalThread} board.`);
+      triggerNotification("Message Sent", `Posted to ${portalThread} board.`);
     } catch (err) {
       console.error("Error sending message:", err);
     }
   };
 
-  const uploadPhotoMock = async () => {
-    const randomImg = MOCK_PHOTOS[Math.floor(Math.random() * MOCK_PHOTOS.length)];
+  const uploadRealPhoto = async (file) => {
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'photos'), {
-        url: randomImg,
+      const storageRef = ref(storage, `photos/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+
+      await addDoc(collection(db, 'photos'), {
+        url: downloadUrl,
         uploadedBy: user.uid,
         uploaderRole: role,
-        location: "Site Sector B",
+        location: "Site Upload",
         createdAt: serverTimestamp()
       });
-      triggerNotification("Photo Uploaded", "Successfully synced to admin portal.");
+      triggerNotification("Photo Uploaded", "Successfully synced.");
     } catch (err) {
       console.error("Error uploading photo:", err);
+      triggerNotification("Error", "Failed to upload photo.");
     }
   };
 
-  const uploadFileMock = async (fileName, fileType) => {
+  const uploadRealFile = async (file) => {
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'files'), {
-        name: fileName,
-        type: fileType,
-        size: Math.floor(Math.random() * 10) + 1 + " MB",
+      const storageRef = ref(storage, `files/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2) + " MB";
+      const fileExt = file.name.split('.').pop().toUpperCase();
+
+      await addDoc(collection(db, 'files'), {
+        name: file.name,
+        type: fileExt,
+        size: fileSizeMB,
         uploadedBy: role,
-        portalAccess: role === 'admin' ? 'admin' : 'contractor', // Admins can restrict to admin
-        version: "v" + (Math.floor(Math.random() * 3) + 1) + ".0",
+        portalAccess: role === 'admin' ? 'admin' : 'contractor',
+        version: "v1.0",
+        downloadUrl: downloadUrl,
         createdAt: serverTimestamp()
       });
-      triggerNotification("File Uploaded", `${fileName} has been secured.`);
+      triggerNotification("File Uploaded", `${file.name} secured.`);
     } catch (err) {
       console.error("Error uploading file:", err);
+      triggerNotification("Error", "Failed to upload file.");
     }
   };
 
@@ -224,79 +240,29 @@ export default function App() {
     return <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">Initializing Secure Environment...</div>;
   }
 
-  // --- Login & 2FA Screen ---
+  // --- Login Screen ---
   if (!role || !is2FAVerified) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100 p-4 font-sans">
         <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
           <div className="flex justify-center mb-6">
-            <div className="bg-blue-600 p-3 rounded-xl">
-              <HardHat size={40} className="text-white" />
-            </div>
+            <div className="bg-blue-600 p-3 rounded-xl"><HardHat size={40} className="text-white" /></div>
           </div>
           <h1 className="text-3xl font-bold text-center mb-2">ConstrucTrack</h1>
           <p className="text-slate-400 text-center mb-8">Enterprise Project Portal</p>
 
           {!role ? (
-            <div className="space-y-6">
-              {/* Real Production Login Form */}
-              <form onSubmit={handleRealLogin} className="space-y-4">
-                {loginError && <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm text-center">{loginError}</div>}
-                <div>
-                  <input 
-                    type="email" 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Email Address"
-                  />
-                </div>
-                <div>
-                  <input 
-                    type="password" 
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="Password"
-                  />
-                </div>
-                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-colors">
-                  Secure Login
-                </button>
-              </form>
-
-              <div className="relative flex items-center py-2">
-                <div className="flex-grow border-t border-slate-700"></div>
-                <span className="flex-shrink-0 mx-4 text-slate-500 text-xs uppercase">Or use demo mode</span>
-                <div className="flex-grow border-t border-slate-700"></div>
-              </div>
-
-              {/* Demo Buttons */}
-              <div className="grid grid-cols-2 gap-4">
-                <button 
-                  onClick={() => handleLogin('admin')}
-                  className="flex flex-col items-center justify-center bg-slate-700 hover:bg-slate-600 p-3 rounded-xl transition-colors border border-slate-600 hover:border-blue-500 group"
-                >
-                  <ShieldCheck className="text-blue-400 mb-1" size={20} />
-                  <span className="text-xs font-semibold text-white">Demo Admin</span>
-                </button>
-
-                <button 
-                  onClick={() => handleLogin('contractor')}
-                  className="flex flex-col items-center justify-center bg-slate-700 hover:bg-slate-600 p-3 rounded-xl transition-colors border border-slate-600 hover:border-amber-500 group"
-                >
-                  <Users className="text-amber-400 mb-1" size={20} />
-                  <span className="text-xs font-semibold text-white">Demo Contractor</span>
-                </button>
-              </div>
-            </div>
+            <form onSubmit={handleRealLogin} className="space-y-4">
+              {loginError && <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm text-center">{loginError}</div>}
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Email Address" />
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Password" />
+              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-colors">Secure Login</button>
+            </form>
           ) : (
             <div className="text-center space-y-6 animate-pulse">
               <ShieldCheck size={48} className="mx-auto text-green-400" />
               <div>
-                <h3 className="text-xl font-bold text-white">Verifying 2FA...</h3>
+                <h3 className="text-xl font-bold text-white">Verifying Identity...</h3>
                 <p className="text-sm text-slate-400 mt-2">Connecting to identity provider securely.</p>
               </div>
             </div>
@@ -323,10 +289,7 @@ export default function App() {
         {notifications.map(notif => (
           <div key={notif.id} className="bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-3 animate-bounce">
             <Bell size={18} />
-            <div>
-              <p className="font-bold text-sm">{notif.title}</p>
-              <p className="text-xs opacity-90">{notif.message}</p>
-            </div>
+            <div><p className="font-bold text-sm">{notif.title}</p><p className="text-xs opacity-90">{notif.message}</p></div>
           </div>
         ))}
       </div>
@@ -338,15 +301,14 @@ export default function App() {
             <HardHat className={role === 'admin' ? 'text-blue-500' : 'text-amber-500'} />
             <span className="font-bold text-lg tracking-tight">ConstrucTrack</span>
           </div>
-          <button onClick={() => setSidebarOpen(false)} className="lg:hidden">
-            <X size={20} />
-          </button>
+          <button onClick={() => setSidebarOpen(false)} className="lg:hidden"><X size={20} /></button>
         </div>
         
         <div className="p-4">
           <div className={`px-4 py-3 rounded-lg mb-6 ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
             <p className="text-xs uppercase tracking-wider font-semibold text-slate-500 mb-1">Logged in as</p>
             <p className={`font-bold capitalize ${role === 'admin' ? 'text-blue-400' : 'text-amber-500'}`}>{role} Portal</p>
+            <p className="text-[10px] text-slate-500 mt-1 truncate">{user.email}</p>
           </div>
 
           <nav className="space-y-1">
@@ -393,13 +355,6 @@ export default function App() {
             <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full hover:bg-slate-800 text-slate-400">
               {darkMode ? '☀️' : '🌙'}
             </button>
-            <div className="relative">
-              <Bell size={20} className="text-slate-400" />
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-              </span>
-            </div>
             <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-sm ${role === 'admin' ? 'bg-blue-600' : 'bg-amber-500'} text-white`}>
               {role === 'admin' ? 'A' : 'C'}
             </div>
@@ -408,10 +363,10 @@ export default function App() {
 
         {/* Scrollable Content Area */}
         <div className="flex-1 p-4 lg:p-8 overflow-auto">
-          {currentView === 'dashboard' && role === 'admin' && <DashboardView photos={photos} files={files} messages={messages} darkMode={darkMode} />}
-          {currentView === 'photos' && <PhotosView photos={photos} role={role} onUpload={uploadPhotoMock} darkMode={darkMode} />}
+          {currentView === 'dashboard' && role === 'admin' && <DashboardView photos={photos} files={files} messages={messages} projectInfo={projectInfo} onSave={saveProjectInfo} darkMode={darkMode} />}
+          {currentView === 'photos' && <PhotosView photos={photos} role={role} onUpload={uploadRealPhoto} darkMode={darkMode} />}
           {currentView === 'messages' && <MessagesView messages={messages} role={role} onSend={addMessage} darkMode={darkMode} user={user} />}
-          {currentView === 'files' && <FilesView files={files} role={role} onUpload={uploadFileMock} darkMode={darkMode} />}
+          {currentView === 'files' && <FilesView files={files} role={role} onUpload={uploadRealFile} darkMode={darkMode} />}
           {currentView === 'settings' && <SettingsView darkMode={darkMode} />}
         </div>
       </main>
@@ -421,16 +376,73 @@ export default function App() {
 
 // --- View Components ---
 
-function DashboardView({ photos, files, messages, darkMode }) {
+function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editData, setEditData] = useState(projectInfo);
+
+  // Sync state if projectInfo updates externally
+  useEffect(() => { setEditData(projectInfo); }, [projectInfo]);
+
   const adminMessages = messages.filter(m => m.portalThread === 'admin');
   const cardBg = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm';
+  const inputBg = darkMode ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900';
+
+  const handleSave = () => {
+    onSave(editData);
+    setIsEditing(false);
+  };
+
+  const updateMilestone = (id, field, value) => {
+    const updated = editData.milestones.map(m => m.id === id ? { ...m, [field]: value } : m);
+    setEditData({ ...editData, milestones: updated });
+  };
+
+  const addMilestone = () => {
+    const newMilestone = { id: Date.now(), title: "New Phase", status: "upcoming", date: "TBD", progress: 0 };
+    setEditData({ ...editData, milestones: [...editData.milestones, newMilestone] });
+  };
+
+  const removeMilestone = (id) => {
+    setEditData({ ...editData, milestones: editData.milestones.filter(m => m.id !== id) });
+  };
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-2xl font-bold">Admin Overview</h2>
+        {isEditing ? (
+          <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors">
+            <Save size={18} className="mr-2" /> Save Changes
+          </button>
+        ) : (
+          <button onClick={() => setIsEditing(true)} className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors">
+            <Edit3 size={18} className="mr-2" /> Edit Dashboard
+          </button>
+        )}
+      </div>
+
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Project Budget" value="$4.2M / $5.0M" subtext="On track" icon={Activity} color="text-emerald-500" bg={cardBg} />
-        <StatCard title="Open RFIs" value="12" subtext="3 urgent" icon={AlertCircle} color="text-amber-500" bg={cardBg} />
+        {isEditing ? (
+          <div className={`p-6 rounded-2xl border ${cardBg} flex flex-col space-y-2`}>
+            <h4 className="text-slate-500 text-sm font-medium">Edit Budget</h4>
+            <input type="text" value={editData.budget} onChange={e => setEditData({...editData, budget: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Spent (e.g. $4.2M)" />
+            <input type="text" value={editData.budgetTotal} onChange={e => setEditData({...editData, budgetTotal: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Total (e.g. $5.0M)" />
+          </div>
+        ) : (
+          <StatCard title="Project Budget" value={`${projectInfo.budget} / ${projectInfo.budgetTotal}`} subtext="On track" icon={Activity} color="text-emerald-500" bg={cardBg} />
+        )}
+
+        {isEditing ? (
+          <div className={`p-6 rounded-2xl border ${cardBg} flex flex-col space-y-2`}>
+            <h4 className="text-slate-500 text-sm font-medium">Edit RFIs</h4>
+            <input type="text" value={editData.openRFIs} onChange={e => setEditData({...editData, openRFIs: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Number (e.g. 12)" />
+            <input type="text" value={editData.rfiSubtext} onChange={e => setEditData({...editData, rfiSubtext: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Subtext (e.g. 3 urgent)" />
+          </div>
+        ) : (
+          <StatCard title="Open RFIs" value={projectInfo.openRFIs} subtext={projectInfo.rfiSubtext} icon={AlertCircle} color="text-amber-500" bg={cardBg} />
+        )}
+
         <StatCard title="Unread Messages" value={adminMessages.length} subtext="Admin Portal" icon={MessageSquare} color="text-blue-500" bg={cardBg} />
         <StatCard title="Total Files" value={files.length} subtext="Secure Vault" icon={FileText} color="text-purple-500" bg={cardBg} />
       </div>
@@ -438,27 +450,49 @@ function DashboardView({ photos, files, messages, darkMode }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Content Column */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Gantt / Milestones Placeholder */}
           <div className={`p-6 rounded-2xl border ${cardBg}`}>
-            <h3 className="text-lg font-semibold mb-6 flex items-center"><Clock className="mr-2" size={20}/> Project Timeline & Milestones</h3>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-semibold flex items-center"><Clock className="mr-2" size={20}/> Project Timeline & Milestones</h3>
+              {isEditing && <button onClick={addMilestone} className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded flex items-center"><Plus size={16} className="mr-1"/> Add Phase</button>}
+            </div>
+            
             <div className="space-y-6">
-              <MilestoneItem title="Foundation Pour" status="completed" date="Oct 15, 2025" />
-              <MilestoneItem title="Structural Steel Erection" status="in-progress" date="Current Phase - 60%" progress={60} />
-              <MilestoneItem title="Envelope & Glazing" status="upcoming" date="Dec 01, 2025" />
-              <MilestoneItem title="Interior Fit-out" status="upcoming" date="Jan 20, 2026" />
+              {(isEditing ? editData.milestones : projectInfo.milestones).map((m, index) => (
+                isEditing ? (
+                  <div key={m.id} className={`p-4 rounded-xl border border-dashed ${darkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-300 bg-slate-50'} flex flex-col md:flex-row gap-3`}>
+                    <div className="flex-1 space-y-2">
+                      <input type="text" value={m.title} onChange={e => updateMilestone(m.id, 'title', e.target.value)} className={`w-full p-2 text-sm rounded border ${inputBg}`} placeholder="Phase Title" />
+                      <input type="text" value={m.date} onChange={e => updateMilestone(m.id, 'date', e.target.value)} className={`w-full p-2 text-sm rounded border ${inputBg}`} placeholder="Date / Timeline" />
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <select value={m.status} onChange={e => updateMilestone(m.id, 'status', e.target.value)} className={`w-full p-2 text-sm rounded border ${inputBg}`}>
+                        <option value="completed">Completed</option>
+                        <option value="in-progress">In Progress</option>
+                        <option value="upcoming">Upcoming</option>
+                      </select>
+                      {m.status === 'in-progress' && (
+                        <input type="number" value={m.progress} onChange={e => updateMilestone(m.id, 'progress', e.target.value)} className={`w-full p-2 text-sm rounded border ${inputBg}`} placeholder="Progress % (e.g. 60)" />
+                      )}
+                    </div>
+                    <button onClick={() => removeMilestone(m.id)} className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg self-start"><Trash2 size={20}/></button>
+                  </div>
+                ) : (
+                  <MilestoneItem key={m.id} title={m.title} status={m.status} date={m.date} progress={m.progress} />
+                )
+              ))}
+              {!isEditing && projectInfo.milestones.length === 0 && <p className="text-slate-500 text-sm">No milestones configured.</p>}
             </div>
           </div>
         </div>
 
         {/* Sidebar Column */}
         <div className="space-y-6">
-          {/* Recent Photos Mini-Feed */}
           <div className={`p-6 rounded-2xl border ${cardBg}`}>
             <h3 className="text-lg font-semibold mb-4 flex items-center"><ImageIcon className="mr-2" size={20}/> Recent Site Photos</h3>
             <div className="grid grid-cols-2 gap-2">
               {photos.slice(0, 4).map((photo) => (
                 <div key={photo.id} className="aspect-square rounded-lg overflow-hidden relative group">
-                  <img src={photo.url} alt="Site progress" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                  <img src={photo.url} alt="Site progress" className="w-full h-full object-cover" />
                 </div>
               ))}
               {photos.length === 0 && <p className="text-sm text-slate-500 col-span-2">No photos uploaded yet.</p>}
@@ -474,9 +508,7 @@ function StatCard({ title, value, subtext, icon: Icon, color, bg }) {
   return (
     <div className={`p-6 rounded-2xl border ${bg} flex flex-col`}>
       <div className="flex justify-between items-start mb-4">
-        <div className={`p-3 rounded-xl bg-opacity-10 ${color.replace('text-', 'bg-')}`}>
-          <Icon size={24} className={color} />
-        </div>
+        <div className={`p-3 rounded-xl bg-opacity-10 ${color.replace('text-', 'bg-')}`}><Icon size={24} className={color} /></div>
       </div>
       <h4 className="text-slate-500 text-sm font-medium mb-1">{title}</h4>
       <span className="text-2xl font-bold mb-1">{value}</span>
@@ -486,12 +518,7 @@ function StatCard({ title, value, subtext, icon: Icon, color, bg }) {
 }
 
 function MilestoneItem({ title, status, date, progress }) {
-  const statusColors = {
-    'completed': 'text-emerald-500',
-    'in-progress': 'text-blue-500',
-    'upcoming': 'text-slate-500'
-  };
-
+  const statusColors = { 'completed': 'text-emerald-500', 'in-progress': 'text-blue-500', 'upcoming': 'text-slate-500' };
   return (
     <div className="relative pl-6 border-l-2 border-slate-700 pb-2 last:border-0 last:pb-0">
       <div className={`absolute -left-[9px] top-0 bg-slate-900 rounded-full p-0.5 ${statusColors[status]}`}>
@@ -500,10 +527,8 @@ function MilestoneItem({ title, status, date, progress }) {
       <div className="-mt-1.5">
         <h5 className={`font-semibold text-sm ${status === 'upcoming' ? 'text-slate-400' : ''}`}>{title}</h5>
         <p className="text-xs text-slate-500 mt-0.5">{date}</p>
-        {status === 'in-progress' && progress && (
-          <div className="mt-3 w-full bg-slate-700 rounded-full h-1.5">
-            <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${progress}%` }}></div>
-          </div>
+        {status === 'in-progress' && progress > 0 && (
+          <div className="mt-3 w-full bg-slate-700 rounded-full h-1.5"><div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${progress}%` }}></div></div>
         )}
       </div>
     </div>
@@ -511,6 +536,17 @@ function MilestoneItem({ title, status, date, progress }) {
 }
 
 function PhotosView({ photos, role, onUpload, darkMode }) {
+  const fileInputRef = useRef(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsUploading(true);
+    await onUpload(file);
+    setIsUploading(false);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -519,9 +555,12 @@ function PhotosView({ photos, role, onUpload, darkMode }) {
           <p className="text-sm text-slate-500">Live feed from the field</p>
         </div>
         {role === 'contractor' && (
-          <button onClick={onUpload} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors">
-            <Upload size={18} className="mr-2" /> Upload Photo
-          </button>
+          <>
+            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+            <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors disabled:opacity-50">
+              {isUploading ? "Uploading..." : <><Upload size={18} className="mr-2" /> Upload Photo</>}
+            </button>
+          </>
         )}
       </div>
 
@@ -535,17 +574,14 @@ function PhotosView({ photos, role, onUpload, darkMode }) {
           {photos.map(photo => (
             <div key={photo.id} className={`rounded-xl overflow-hidden border ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
               <div className="aspect-[4/3] relative">
-                <img src={photo.url} alt="Site" className="absolute inset-0 w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-3">
-                  <span className="text-white text-xs font-medium flex items-center bg-black/40 px-2 py-1 rounded backdrop-blur-sm">
-                    {photo.location || "Site Area"}
-                  </span>
-                </div>
+                <a href={photo.url} target="_blank" rel="noopener noreferrer">
+                  <img src={photo.url} alt="Site" className="absolute inset-0 w-full h-full object-cover hover:opacity-90 transition-opacity" />
+                </a>
               </div>
               <div className="p-3">
                 <p className="text-xs text-slate-500 flex justify-between">
                   <span>{photo.createdAt?.toDate().toLocaleDateString() || 'Just now'}</span>
-                  <span className="capitalize">{photo.uploaderRole}</span>
+                  <span className="capitalize font-medium">{photo.uploaderRole}</span>
                 </p>
               </div>
             </div>
@@ -561,7 +597,6 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
   const [newMsg, setNewMsg] = useState("");
   const messagesEndRef = useRef(null);
 
-  // Filter messages by active tab/portal thread
   const filteredMessages = messages.filter(m => m.portalThread === activeTab);
 
   const handleSend = (e) => {
@@ -574,52 +609,44 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [filteredMessages]);
 
-  const parseMarkdown = (text) => {
-    // Very basic markdown parser for demo (*italic*, **bold**)
-    let html = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    return <span dangerouslySetInnerHTML={{ __html: html }} />;
-  };
-
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
+
+  // Format date nicely (e.g. "Mar 13 at 2:30 PM")
+  const formatTimestamp = (fbTimestamp) => {
+    if (!fbTimestamp) return 'Sending...';
+    const date = fbTimestamp.toDate();
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
+  };
 
   return (
     <div className={`flex flex-col h-[calc(100vh-8rem)] rounded-2xl border ${bgStyle} overflow-hidden`}>
       {/* Tabs for Admins */}
       {role === 'admin' && (
         <div className={`flex border-b ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'}`}>
-          <button 
-            onClick={() => setActiveTab('admin')} 
-            className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'admin' ? 'border-b-2 border-blue-500 text-blue-500' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            Admin Board
-          </button>
-          <button 
-            onClick={() => setActiveTab('contractor')} 
-            className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'contractor' ? 'border-b-2 border-amber-500 text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            Contractor Thread
-          </button>
+          <button onClick={() => setActiveTab('admin')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'admin' ? 'border-b-2 border-blue-500 text-blue-500' : 'text-slate-500 hover:text-slate-300'}`}>Admin Board</button>
+          <button onClick={() => setActiveTab('contractor')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'contractor' ? 'border-b-2 border-amber-500 text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}>Contractor Thread</button>
         </div>
       )}
 
       {/* Messages Area */}
       <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${darkMode ? 'bg-slate-950' : 'bg-slate-50'}`}>
         {filteredMessages.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-            No messages in this thread yet. Be the first to post.
-          </div>
+          <div className="h-full flex items-center justify-center text-slate-500 text-sm">No messages yet. Be the first to post!</div>
         ) : (
           filteredMessages.map((msg, i) => {
             const isMe = msg.authorId === user.uid;
             return (
               <div key={msg.id || i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                <div className="flex items-baseline space-x-2 mb-1 px-1">
+                {/* Meta Data: Role, Email, Timestamp */}
+                <div className={`flex items-baseline space-x-2 mb-1 px-1 ${isMe ? 'flex-row-reverse space-x-reverse' : 'flex-row'}`}>
                   {!isMe && <span className={`text-xs font-bold capitalize ${msg.authorRole === 'admin' ? 'text-blue-400' : 'text-amber-500'}`}>{msg.authorRole}</span>}
-                  <span className="text-[10px] text-slate-500">{msg.createdAt?.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || 'Now'}</span>
+                  <span className="text-xs text-slate-400 font-medium">{isMe ? 'You' : msg.authorEmail}</span>
+                  <span className="text-[10px] text-slate-500">{formatTimestamp(msg.createdAt)}</span>
                 </div>
-                <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (darkMode ? 'bg-slate-800 text-slate-200 rounded-bl-none' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none')}`}>
-                  {parseMarkdown(msg.text)}
+                
+                {/* Message Bubble */}
+                <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (darkMode ? 'bg-slate-800 text-slate-200 rounded-bl-none' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-sm')}`}>
+                  {msg.text}
                 </div>
               </div>
             );
@@ -635,10 +662,10 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
             type="text"
             value={newMsg}
             onChange={(e) => setNewMsg(e.target.value)}
-            placeholder={`Type a message in ${activeTab} thread... (*italic*, **bold** supported)`}
+            placeholder={`Type a message in ${activeTab} thread...`}
             className={`w-full py-3 pl-4 pr-12 rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-100 border-slate-300 text-slate-900'}`}
           />
-          <button type="submit" disabled={!newMsg.trim()} className="absolute right-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors">
+          <button type="submit" disabled={!newMsg.trim()} className="absolute right-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
             <Send size={18} />
           </button>
         </form>
@@ -649,13 +676,15 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
 
 function FilesView({ files, role, onUpload, darkMode }) {
   const visibleFiles = role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin');
-  
-  const handleSimulatedUpload = () => {
-    const types = ['PDF', 'DWG', 'DOCX'];
-    const names = ['Structural_Plans_Rev2', 'HVAC_Submittal', 'Site_Survey_Report', 'Change_Order_04'];
-    const randomType = types[Math.floor(Math.random() * types.length)];
-    const randomName = names[Math.floor(Math.random() * names.length)] + `.${randomType.toLowerCase()}`;
-    onUpload(randomName, randomType);
+  const fileInputRef = useRef(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsUploading(true);
+    await onUpload(file);
+    setIsUploading(false);
   };
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
@@ -668,9 +697,12 @@ function FilesView({ files, role, onUpload, darkMode }) {
           <h2 className="text-2xl font-bold">Document Center</h2>
           <p className="text-sm text-slate-500">Secure, versioned file repository</p>
         </div>
-        <button onClick={handleSimulatedUpload} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors">
-          <Upload size={18} className="mr-2" /> Upload File
-        </button>
+        <div>
+          <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+          <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors disabled:opacity-50">
+            {isUploading ? "Uploading..." : <><Upload size={18} className="mr-2" /> Upload File</>}
+          </button>
+        </div>
       </div>
 
       <div className={`rounded-2xl border ${bgStyle} overflow-hidden`}>
@@ -679,36 +711,33 @@ function FilesView({ files, role, onUpload, darkMode }) {
             <thead>
               <tr className={`${headerStyle} border-b ${darkMode ? 'border-slate-800' : 'border-slate-200'} text-xs uppercase tracking-wider`}>
                 <th className="p-4 font-semibold">File Name</th>
-                <th className="p-4 font-semibold">Version</th>
+                <th className="p-4 font-semibold">Size</th>
                 <th className="p-4 font-semibold">Uploaded By</th>
                 <th className="p-4 font-semibold">Date</th>
-                <th className="p-4 font-semibold text-right">Action</th>
+                <th className="p-4 font-semibold text-right">Download</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {visibleFiles.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="p-8 text-center text-slate-500">No files found for your access level.</td>
-                </tr>
+                <tr><td colSpan="5" className="p-8 text-center text-slate-500">No files uploaded yet.</td></tr>
               ) : (
                 visibleFiles.map(file => (
                   <tr key={file.id} className={`transition-colors ${darkMode ? 'hover:bg-slate-800/50 divide-slate-800' : 'hover:bg-slate-50 divide-slate-200 border-b'}`}>
                     <td className="p-4">
                       <div className="flex items-center space-x-3">
                         <FileText size={20} className={file.type === 'PDF' ? 'text-red-400' : 'text-blue-400'} />
-                        <div>
-                          <p className="font-medium text-sm">{file.name}</p>
-                          <p className="text-xs text-slate-500">{file.size}</p>
-                        </div>
+                        <div><p className="font-medium text-sm">{file.name}</p></div>
                       </div>
                     </td>
-                    <td className="p-4 text-sm"><span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">{file.version}</span></td>
+                    <td className="p-4 text-sm text-slate-500">{file.size}</td>
                     <td className="p-4 text-sm capitalize">{file.uploadedBy}</td>
                     <td className="p-4 text-sm text-slate-500">{file.createdAt?.toDate().toLocaleDateString() || 'Today'}</td>
                     <td className="p-4 text-right">
-                      <button className="text-blue-500 hover:text-blue-400 p-2">
-                        <Download size={18} />
-                      </button>
+                      {file.downloadUrl && (
+                        <a href={file.downloadUrl} target="_blank" rel="noopener noreferrer" className="inline-block text-blue-500 hover:text-blue-400 p-2">
+                          <Download size={18} />
+                        </a>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -739,27 +768,15 @@ function SettingsView({ darkMode }) {
         <h3 className="text-lg font-semibold border-b border-inherit pb-4">Notifications</h3>
         
         <div className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">Push Notifications</p>
-            <p className="text-xs text-slate-500">Real-time alerts for messages and uploads (via FCM)</p>
-          </div>
-          <button 
-            onClick={() => setPushEnabled(!pushEnabled)}
-            className={`w-12 h-6 rounded-full transition-colors relative ${pushEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
-          >
+          <div><p className="font-medium">Push Notifications</p><p className="text-xs text-slate-500">Real-time alerts for messages and uploads (via FCM)</p></div>
+          <button onClick={() => setPushEnabled(!pushEnabled)} className={`w-12 h-6 rounded-full transition-colors relative ${pushEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}>
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${pushEnabled ? 'left-7' : 'left-1'}`} />
           </button>
         </div>
 
         <div className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">Email Digests</p>
-            <p className="text-xs text-slate-500">Daily summary of portal activity (via SendGrid)</p>
-          </div>
-          <button 
-            onClick={() => setEmailEnabled(!emailEnabled)}
-            className={`w-12 h-6 rounded-full transition-colors relative ${emailEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
-          >
+          <div><p className="font-medium">Email Digests</p><p className="text-xs text-slate-500">Daily summary of portal activity (via SendGrid)</p></div>
+          <button onClick={() => setEmailEnabled(!emailEnabled)} className={`w-12 h-6 rounded-full transition-colors relative ${emailEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}>
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${emailEnabled ? 'left-7' : 'left-1'}`} />
           </button>
         </div>
@@ -769,14 +786,8 @@ function SettingsView({ darkMode }) {
         <h3 className="text-lg font-semibold border-b border-inherit pb-4 text-red-400">Security</h3>
         
         <div className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">Two-Factor Authentication (2FA)</p>
-            <p className="text-xs text-slate-500">Require SMS/Email code on login</p>
-          </div>
-          <button 
-            onClick={() => setTwoFactor(!twoFactor)}
-            className={`w-12 h-6 rounded-full transition-colors relative ${twoFactor ? 'bg-emerald-500' : 'bg-slate-700'}`}
-          >
+          <div><p className="font-medium">Two-Factor Authentication (2FA)</p><p className="text-xs text-slate-500">Require SMS/Email code on login</p></div>
+          <button onClick={() => setTwoFactor(!twoFactor)} className={`w-12 h-6 rounded-full transition-colors relative ${twoFactor ? 'bg-emerald-500' : 'bg-slate-700'}`}>
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${twoFactor ? 'left-7' : 'left-1'}`} />
           </button>
         </div>
