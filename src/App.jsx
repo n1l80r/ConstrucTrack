@@ -88,25 +88,25 @@ export default function App() {
     // Subscribe to Data
     const unsubPhotos = onSnapshot(photosRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      data.sort((a, b) => ((b.createdAt?.toMillis && b.createdAt.toMillis()) || 0) - ((a.createdAt?.toMillis && a.createdAt.toMillis()) || 0));
       setPhotos(data);
     });
 
     const unsubMessages = onSnapshot(messagesRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      data.sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
+      data.sort((a, b) => ((a.createdAt?.toMillis && a.createdAt.toMillis()) || 0) - ((b.createdAt?.toMillis && b.createdAt.toMillis()) || 0));
       setMessages(data);
     });
 
     const unsubFiles = onSnapshot(filesRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      data.sort((a, b) => ((b.createdAt?.toMillis && b.createdAt.toMillis()) || 0) - ((a.createdAt?.toMillis && a.createdAt.toMillis()) || 0));
       setFiles(data);
     });
 
     const unsubProjectInfo = onSnapshot(projectInfoRef, (docSnap) => {
       if (docSnap.exists()) {
-        setProjectInfo(docSnap.data());
+        setProjectInfo({ ...DEFAULT_PROJECT_INFO, ...docSnap.data() });
       } else {
         // If it doesn't exist yet, save the defaults to the database
         setDoc(projectInfoRef, DEFAULT_PROJECT_INFO);
@@ -149,8 +149,16 @@ export default function App() {
         await signOut(auth);
       }
     } catch (error) {
-      console.error(error);
-      setLoginError("Invalid email or password.");
+      // Improved error handling to catch invalid credentials cleanly
+      console.error("Login Attempt Failed:", error.code);
+      
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        setLoginError("Incorrect email or password. Please verify your account exists.");
+      } else if (error.code === 'auth/too-many-requests') {
+        setLoginError("Too many failed attempts. Please try again later.");
+      } else {
+        setLoginError("Authentication failed. Please try again.");
+      }
     }
   };
 
@@ -198,6 +206,7 @@ export default function App() {
       await addDoc(collection(db, 'photos'), {
         url: downloadUrl,
         uploadedBy: user.uid,
+        uploaderEmail: user.email || 'Unknown User',
         uploaderRole: role,
         location: "Site Upload",
         createdAt: serverTimestamp()
@@ -223,7 +232,8 @@ export default function App() {
         type: fileExt,
         size: fileSizeMB,
         category: category || 'General',
-        uploadedBy: role,
+        uploadedBy: user.email || 'Unknown User',
+        uploaderRole: role,
         portalAccess: adminOnly ? 'admin' : 'all',
         version: "v1.0",
         downloadUrl: downloadUrl,
@@ -231,7 +241,7 @@ export default function App() {
       });
       triggerNotification("File Uploaded", `${file.name} secured.`);
       
-      // Return the details so other components (like the message board) can use the link
+      // Return details for Message Board attachments
       return { name: file.name, downloadUrl };
     } catch (err) {
       console.error("Error uploading file:", err);
@@ -391,10 +401,13 @@ export default function App() {
 // --- View Components ---
 
 function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode }) {
+  const safeProjectInfo = { ...DEFAULT_PROJECT_INFO, ...(projectInfo || {}) };
+  const safeMilestones = safeProjectInfo.milestones || [];
+  
   const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState(projectInfo);
+  const [editData, setEditData] = useState(safeProjectInfo);
 
-  useEffect(() => { setEditData(projectInfo); }, [projectInfo]);
+  useEffect(() => { setEditData({ ...DEFAULT_PROJECT_INFO, ...(projectInfo || {}) }); }, [projectInfo]);
 
   const adminMessages = messages.filter(m => m.portalThread === 'admin');
   const cardBg = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm';
@@ -406,17 +419,17 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
   };
 
   const updateMilestone = (id, field, value) => {
-    const updated = editData.milestones.map(m => m.id === id ? { ...m, [field]: value } : m);
+    const updated = (editData.milestones || []).map(m => m.id === id ? { ...m, [field]: value } : m);
     setEditData({ ...editData, milestones: updated });
   };
 
   const addMilestone = () => {
     const newMilestone = { id: Date.now(), title: "New Phase", status: "upcoming", date: "TBD", progress: 0 };
-    setEditData({ ...editData, milestones: [...editData.milestones, newMilestone] });
+    setEditData({ ...editData, milestones: [...(editData.milestones || []), newMilestone] });
   };
 
   const removeMilestone = (id) => {
-    setEditData({ ...editData, milestones: editData.milestones.filter(m => m.id !== id) });
+    setEditData({ ...editData, milestones: (editData.milestones || []).filter(m => m.id !== id) });
   };
 
   return (
@@ -438,21 +451,21 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
         {isEditing ? (
           <div className={`p-6 rounded-2xl border ${cardBg} flex flex-col space-y-2`}>
             <h4 className="text-slate-500 text-sm font-medium">Edit Budget</h4>
-            <input type="text" value={editData.budget} onChange={e => setEditData({...editData, budget: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Spent (e.g. $4.2M)" />
-            <input type="text" value={editData.budgetTotal} onChange={e => setEditData({...editData, budgetTotal: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Total (e.g. $5.0M)" />
+            <input type="text" value={editData.budget || ''} onChange={e => setEditData({...editData, budget: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Spent (e.g. $4.2M)" />
+            <input type="text" value={editData.budgetTotal || ''} onChange={e => setEditData({...editData, budgetTotal: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Total (e.g. $5.0M)" />
           </div>
         ) : (
-          <StatCard title="Project Budget" value={`${projectInfo.budget} / ${projectInfo.budgetTotal}`} subtext="On track" icon={Activity} color="text-emerald-500" bg={cardBg} />
+          <StatCard title="Project Budget" value={`${safeProjectInfo.budget || '$0'} / ${safeProjectInfo.budgetTotal || '$0'}`} subtext="On track" icon={Activity} color="text-emerald-500" bg={cardBg} />
         )}
 
         {isEditing ? (
           <div className={`p-6 rounded-2xl border ${cardBg} flex flex-col space-y-2`}>
             <h4 className="text-slate-500 text-sm font-medium">Edit RFIs</h4>
-            <input type="text" value={editData.openRFIs} onChange={e => setEditData({...editData, openRFIs: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Number (e.g. 12)" />
-            <input type="text" value={editData.rfiSubtext} onChange={e => setEditData({...editData, rfiSubtext: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Subtext (e.g. 3 urgent)" />
+            <input type="text" value={editData.openRFIs || ''} onChange={e => setEditData({...editData, openRFIs: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Number (e.g. 12)" />
+            <input type="text" value={editData.rfiSubtext || ''} onChange={e => setEditData({...editData, rfiSubtext: e.target.value})} className={`p-2 rounded border ${inputBg}`} placeholder="Subtext (e.g. 3 urgent)" />
           </div>
         ) : (
-          <StatCard title="Open RFIs" value={projectInfo.openRFIs} subtext={projectInfo.rfiSubtext} icon={AlertCircle} color="text-amber-500" bg={cardBg} />
+          <StatCard title="Open RFIs" value={safeProjectInfo.openRFIs || '0'} subtext={safeProjectInfo.rfiSubtext || ''} icon={AlertCircle} color="text-amber-500" bg={cardBg} />
         )}
 
         <StatCard title="Unread Messages" value={adminMessages.length} subtext="Admin Portal" icon={MessageSquare} color="text-blue-500" bg={cardBg} />
@@ -468,7 +481,7 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
             </div>
             
             <div className="space-y-6">
-              {(isEditing ? editData.milestones : projectInfo.milestones).map((m, index) => (
+              {(isEditing ? editData.milestones || [] : safeMilestones).map((m, index) => (
                 isEditing ? (
                   <div key={m.id} className={`p-4 rounded-xl border border-dashed ${darkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-300 bg-slate-50'} flex flex-col md:flex-row gap-3`}>
                     <div className="flex-1 space-y-2">
@@ -491,7 +504,7 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
                   <MilestoneItem key={m.id} title={m.title} status={m.status} date={m.date} progress={m.progress} />
                 )
               ))}
-              {!isEditing && projectInfo.milestones.length === 0 && <p className="text-slate-500 text-sm">No milestones configured.</p>}
+              {!isEditing && safeMilestones.length === 0 && <p className="text-slate-500 text-sm">No milestones configured.</p>}
             </div>
           </div>
         </div>
@@ -514,6 +527,94 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
   );
 }
 
+function StatCard({ title, value, subtext, icon: Icon, color, bg }) {
+  return (
+    <div className={`p-6 rounded-2xl border ${bg} flex flex-col`}>
+      <div className="flex justify-between items-start mb-4">
+        <div className={`p-3 rounded-xl bg-opacity-10 ${color.replace('text-', 'bg-')}`}><Icon size={24} className={color} /></div>
+      </div>
+      <h4 className="text-slate-500 text-sm font-medium mb-1">{title}</h4>
+      <span className="text-2xl font-bold mb-1">{value}</span>
+      <span className="text-xs text-slate-400 font-medium">{subtext}</span>
+    </div>
+  );
+}
+
+function MilestoneItem({ title, status, date, progress }) {
+  const statusColors = { 'completed': 'text-emerald-500', 'in-progress': 'text-blue-500', 'upcoming': 'text-slate-500' };
+  return (
+    <div className="relative pl-6 border-l-2 border-slate-700 pb-2 last:border-0 last:pb-0">
+      <div className={`absolute -left-[9px] top-0 bg-slate-900 rounded-full p-0.5 ${statusColors[status]}`}>
+        {status === 'completed' ? <CheckCircle2 size={16} className="bg-emerald-500 text-white rounded-full" /> : <div className={`w-3 h-3 rounded-full border-2 ${status === 'in-progress' ? 'border-blue-500 bg-blue-500' : 'border-slate-500 bg-slate-800'}`}></div>}
+      </div>
+      <div className="-mt-1.5">
+        <h5 className={`font-semibold text-sm ${status === 'upcoming' ? 'text-slate-400' : ''}`}>{title}</h5>
+        <p className="text-xs text-slate-500 mt-0.5">{date}</p>
+        {status === 'in-progress' && progress > 0 && (
+          <div className="mt-3 w-full bg-slate-700 rounded-full h-1.5"><div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${progress}%` }}></div></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PhotosView({ photos, role, onUpload, darkMode }) {
+  const fileInputRef = useRef(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsUploading(true);
+    await onUpload(file);
+    setIsUploading(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold">Progress Photos</h2>
+          <p className="text-sm text-slate-500">Live feed from the field</p>
+        </div>
+        {role === 'contractor' && (
+          <>
+            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+            <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors disabled:opacity-50">
+              {isUploading ? "Uploading..." : <><Upload size={18} className="mr-2" /> Upload Photo</>}
+            </button>
+          </>
+        )}
+      </div>
+
+      {photos.length === 0 ? (
+        <div className={`p-12 text-center rounded-2xl border border-dashed ${darkMode ? 'border-slate-700 text-slate-500' : 'border-slate-300 text-slate-400'}`}>
+          <Camera size={48} className="mx-auto mb-4 opacity-50" />
+          <p>No photos have been uploaded to the live feed yet.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
+          {photos.map(photo => (
+            <div key={photo.id} className={`rounded-xl overflow-hidden border ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+              <div className="aspect-[4/3] relative">
+                <a href={photo.url} target="_blank" rel="noopener noreferrer">
+                  <img src={photo.url} alt="Site" className="absolute inset-0 w-full h-full object-cover hover:opacity-90 transition-opacity" />
+                </a>
+              </div>
+              <div className="p-3">
+                <p className="text-xs text-slate-500 flex justify-between">
+                  <span>{(photo.createdAt && typeof photo.createdAt.toDate === 'function') ? photo.createdAt.toDate().toLocaleDateString() : 'Just now'}</span>
+                  <span className="font-medium truncate max-w-[150px] text-right" title={photo.uploaderEmail || photo.uploaderRole}>{photo.uploaderEmail || photo.uploaderRole}</span>
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpload }) {
   const [activeTab, setActiveTab] = useState(role === 'admin' ? 'admin' : 'contractor');
   const [newMsg, setNewMsg] = useState("");
@@ -524,11 +625,7 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
   const fileInputRef = useRef(null);
 
   const filteredMessages = messages.filter(m => m.portalThread === activeTab);
-  
-  // Get visible files for the attachment dropdown
   const visibleFiles = files ? (role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin')) : [];
-  
-  // Get unique users in the current thread for the tagging dropdown
   const uniqueUsers = Array.from(new Set(filteredMessages.map(m => m.authorEmail))).filter(email => email && email !== 'Unknown User');
 
   const handleSend = (e) => {
@@ -546,21 +643,18 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
 
   const formatTimestamp = (fbTimestamp) => {
-    if (!fbTimestamp) return 'Sending...';
+    if (!fbTimestamp || typeof fbTimestamp.toDate !== 'function') return 'Just now';
     const date = fbTimestamp.toDate();
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
   };
 
-  // Parses [FileName](url) links and @user tags into HTML
   const formatMessageContent = (text) => {
     if (!text) return { __html: '' };
     let html = text
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      // Match markdown-style links for documents
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:text-blue-400 underline font-semibold break-all">📎 $1</a>`)
-      // Match @email tags
       .replace(/(@[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|@[a-zA-Z0-9_-]+)/g, `<span class="bg-blue-500/20 text-blue-500 px-1 rounded font-bold">$1</span>`);
     return { __html: html };
   };
@@ -582,7 +676,6 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
     setIsUploading(true);
     setShowAttachments(false);
 
-    // If Admin uploads a file directly to the Admin board, lock it down to admins. Otherwise public.
     const isAdminOnly = role === 'admin' && activeTab === 'admin';
     const result = await onFileUpload(file, 'Message Board Attachment', isAdminOnly);
 
@@ -629,8 +722,6 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
       </div>
 
       <div className={`p-4 border-t ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'} relative`}>
-        
-        {/* Attachments Dropdown Menu */}
         {showAttachments && (
           <div className={`absolute bottom-[110%] left-4 mb-2 w-72 max-h-64 overflow-y-auto rounded-xl shadow-xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} p-2 z-10`}>
             <div className="text-xs font-bold text-slate-500 mb-2 px-2 uppercase flex justify-between items-center">
@@ -659,7 +750,6 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
           </div>
         )}
 
-        {/* Mentions Dropdown Menu */}
         {showMentions && (
           <div className={`absolute bottom-[110%] left-14 mb-2 w-64 max-h-48 overflow-y-auto rounded-xl shadow-xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} p-2 z-10`}>
             <div className="text-xs font-bold text-slate-500 mb-2 px-2 uppercase flex justify-between">
@@ -679,10 +769,8 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
         )}
 
         <form onSubmit={handleSend} className="relative flex items-center space-x-2">
-          {/* Hidden File Input for Direct Uploads */}
           <input type="file" className="hidden" ref={fileInputRef} onChange={handleDirectUpload} />
 
-          {/* Action Buttons */}
           <div className="flex space-x-1">
             <button 
               type="button" 
@@ -723,8 +811,6 @@ function FilesView({ files, role, onUpload, darkMode }) {
   const visibleFiles = role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin');
   const fileInputRef = useRef(null);
   const [isUploading, setIsUploading] = useState(false);
-  
-  // New States for the Upload Modal
   const [showModal, setShowModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [category, setCategory] = useState('Working drawings');
@@ -738,7 +824,7 @@ function FilesView({ files, role, onUpload, darkMode }) {
   const handleFileSelect = (e) => {
     if (e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
-      setShowModal(true); // Open the modal instead of uploading instantly
+      setShowModal(true);
     }
   };
 
@@ -746,7 +832,6 @@ function FilesView({ files, role, onUpload, darkMode }) {
     if (!selectedFile) return;
     setIsUploading(true);
     setShowModal(false);
-    // Pass the extra categorization data up to the database
     await onUpload(selectedFile, category, adminOnly);
     setIsUploading(false);
     setSelectedFile(null);
@@ -773,7 +858,6 @@ function FilesView({ files, role, onUpload, darkMode }) {
         </div>
       </div>
 
-      {/* Pop-up Modal for Categorizing the Upload */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md p-6 rounded-2xl shadow-xl border ${bgStyle}`}>
@@ -795,7 +879,6 @@ function FilesView({ files, role, onUpload, darkMode }) {
                 </select>
               </div>
 
-              {/* Only allow Admins to hide files from contractors */}
               {role === 'admin' && (
                 <label className="flex items-center space-x-3 cursor-pointer">
                   <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
@@ -835,15 +918,14 @@ function FilesView({ files, role, onUpload, darkMode }) {
                         <FileText size={20} className={file.type === 'PDF' ? 'text-red-400' : 'text-blue-400'} />
                         <div>
                           <p className="font-medium text-sm max-w-[200px] truncate">{file.name}</p>
-                          {/* Red badge to show admins which files are hidden from contractors */}
                           {file.portalAccess === 'admin' && <span className="inline-block px-2 py-0.5 mt-1 bg-red-500/20 text-red-400 text-[10px] font-bold rounded uppercase tracking-wider">Admin Only</span>}
                         </div>
                       </div>
                     </td>
                     <td className="p-4 text-sm"><span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs whitespace-nowrap">{file.category || 'General'}</span></td>
                     <td className="p-4 text-sm text-slate-500">{file.size}</td>
-                    <td className="p-4 text-sm capitalize">{file.uploadedBy}</td>
-                    <td className="p-4 text-sm text-slate-500">{file.createdAt?.toDate().toLocaleDateString() || 'Today'}</td>
+                    <td className="p-4 text-sm truncate max-w-[150px]" title={file.uploadedBy}>{file.uploadedBy}</td>
+                    <td className="p-4 text-sm text-slate-500">{(file.createdAt && typeof file.createdAt.toDate === 'function') ? file.createdAt.toDate().toLocaleDateString() : 'Today'}</td>
                     <td className="p-4 text-right">
                       {file.downloadUrl && (
                         <a href={file.downloadUrl} target="_blank" rel="noopener noreferrer" className="inline-block text-blue-500 hover:text-blue-400 p-2">
@@ -880,15 +962,27 @@ function SettingsView({ darkMode }) {
         <h3 className="text-lg font-semibold border-b border-inherit pb-4">Notifications</h3>
         
         <div className="flex items-center justify-between">
-          <div><p className="font-medium">Push Notifications</p><p className="text-xs text-slate-500">Real-time alerts for messages and uploads (via FCM)</p></div>
-          <button onClick={() => setPushEnabled(!pushEnabled)} className={`w-12 h-6 rounded-full transition-colors relative ${pushEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}>
+          <div>
+            <p className="font-medium">Push Notifications</p>
+            <p className="text-xs text-slate-500">Real-time alerts for messages and uploads (via FCM)</p>
+          </div>
+          <button 
+            onClick={() => setPushEnabled(!pushEnabled)}
+            className={`w-12 h-6 rounded-full transition-colors relative ${pushEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
+          >
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${pushEnabled ? 'left-7' : 'left-1'}`} />
           </button>
         </div>
 
         <div className="flex items-center justify-between">
-          <div><p className="font-medium">Email Digests</p><p className="text-xs text-slate-500">Daily summary of portal activity (via SendGrid)</p></div>
-          <button onClick={() => setEmailEnabled(!emailEnabled)} className={`w-12 h-6 rounded-full transition-colors relative ${emailEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}>
+          <div>
+            <p className="font-medium">Email Digests</p>
+            <p className="text-xs text-slate-500">Daily summary of portal activity (via SendGrid)</p>
+          </div>
+          <button 
+            onClick={() => setEmailEnabled(!emailEnabled)}
+            className={`w-12 h-6 rounded-full transition-colors relative ${emailEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
+          >
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${emailEnabled ? 'left-7' : 'left-1'}`} />
           </button>
         </div>
@@ -898,14 +992,18 @@ function SettingsView({ darkMode }) {
         <h3 className="text-lg font-semibold border-b border-inherit pb-4 text-red-400">Security</h3>
         
         <div className="flex items-center justify-between">
-          <div><p className="font-medium">Two-Factor Authentication (2FA)</p><p className="text-xs text-slate-500">Require SMS/Email code on login</p></div>
-          <button onClick={() => setTwoFactor(!twoFactor)} className={`w-12 h-6 rounded-full transition-colors relative ${twoFactor ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+          <div>
+            <p className="font-medium">Two-Factor Authentication (2FA)</p>
+            <p className="text-xs text-slate-500">Require SMS/Email code on login</p>
+          </div>
+          <button 
+            onClick={() => setTwoFactor(!twoFactor)}
+            className={`w-12 h-6 rounded-full transition-colors relative ${twoFactor ? 'bg-emerald-500' : 'bg-slate-700'}`}
+          >
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${twoFactor ? 'left-7' : 'left-1'}`} />
           </button>
         </div>
       </div>
     </div>
-  );
-}
   );
 }
