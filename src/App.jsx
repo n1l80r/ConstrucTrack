@@ -8,7 +8,8 @@ import {
   LayoutDashboard, Image as ImageIcon, MessageSquare, FolderKanban, 
   Settings, Bell, Search, Menu, X, Upload, ShieldCheck, 
   Users, HardHat, FileText, ChevronRight, Activity, Clock, 
-  CheckCircle2, AlertCircle, Download, Camera, Send, Edit3, Save, Plus, Trash2
+  CheckCircle2, AlertCircle, Download, Camera, Send, Edit3, Save, Plus, Trash2,
+  Paperclip, AtSign, Loader2
 } from 'lucide-react';
 
 // --- Firebase Initialization (Using Your Keys) ---
@@ -24,11 +25,10 @@ const firebaseConfig = {
 
 // Initialize Firebase Services
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default';
 
 // Default Dashboard Data (Fallback if database is empty)
 const DEFAULT_PROJECT_INFO = {
@@ -178,7 +178,7 @@ export default function App() {
       await addDoc(collection(db, 'messages'), {
         text,
         authorId: user.uid,
-        authorEmail: user.email || 'Unknown User', // Added Email Tagging
+        authorEmail: user.email || 'Unknown User',
         authorRole: role,
         portalThread, 
         createdAt: serverTimestamp()
@@ -209,7 +209,7 @@ export default function App() {
     }
   };
 
-  const uploadRealFile = async (file) => {
+  const uploadRealFile = async (file, category, adminOnly) => {
     try {
       const storageRef = ref(storage, `files/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
@@ -222,19 +222,23 @@ export default function App() {
         name: file.name,
         type: fileExt,
         size: fileSizeMB,
+        category: category || 'General',
         uploadedBy: role,
-        portalAccess: role === 'admin' ? 'admin' : 'contractor',
+        portalAccess: adminOnly ? 'admin' : 'all',
         version: "v1.0",
         downloadUrl: downloadUrl,
         createdAt: serverTimestamp()
       });
       triggerNotification("File Uploaded", `${file.name} secured.`);
+      
+      // Return the details so other components (like the message board) can use the link
+      return { name: file.name, downloadUrl };
     } catch (err) {
       console.error("Error uploading file:", err);
       triggerNotification("Error", "Failed to upload file.");
+      return null;
     }
   };
-
 
   // --- Render Helpers ---
   if (authLoading) {
@@ -244,8 +248,17 @@ export default function App() {
   // --- Login Screen ---
   if (!role || !is2FAVerified) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100 p-4 font-sans">
-        <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
+      <div 
+        className="min-h-screen flex items-center justify-center text-slate-100 p-4 font-sans relative"
+        style={{ 
+          backgroundImage: 'url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1920&q=80")',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }}
+      >
+        <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-[2px]"></div>
+        
+        <div className="relative z-10 max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
           <div className="flex justify-center mb-6">
             <div className="bg-blue-600 p-3 rounded-xl"><HardHat size={40} className="text-white" /></div>
           </div>
@@ -366,7 +379,7 @@ export default function App() {
         <div className="flex-1 p-4 lg:p-8 overflow-auto">
           {currentView === 'dashboard' && role === 'admin' && <DashboardView photos={photos} files={files} messages={messages} projectInfo={projectInfo} onSave={saveProjectInfo} darkMode={darkMode} />}
           {currentView === 'photos' && <PhotosView photos={photos} role={role} onUpload={uploadRealPhoto} darkMode={darkMode} />}
-          {currentView === 'messages' && <MessagesView messages={messages} role={role} onSend={addMessage} darkMode={darkMode} user={user} />}
+          {currentView === 'messages' && <MessagesView messages={messages} role={role} onSend={addMessage} darkMode={darkMode} user={user} files={files} onFileUpload={uploadRealFile} />}
           {currentView === 'files' && <FilesView files={files} role={role} onUpload={uploadRealFile} darkMode={darkMode} />}
           {currentView === 'settings' && <SettingsView darkMode={darkMode} />}
         </div>
@@ -381,7 +394,6 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(projectInfo);
 
-  // Sync state if projectInfo updates externally
   useEffect(() => { setEditData(projectInfo); }, [projectInfo]);
 
   const adminMessages = messages.filter(m => m.portalThread === 'admin');
@@ -422,7 +434,6 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
         )}
       </div>
 
-      {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {isEditing ? (
           <div className={`p-6 rounded-2xl border ${cardBg} flex flex-col space-y-2`}>
@@ -449,7 +460,6 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content Column */}
         <div className="lg:col-span-2 space-y-6">
           <div className={`p-6 rounded-2xl border ${cardBg}`}>
             <div className="flex justify-between items-center mb-6">
@@ -486,7 +496,6 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
           </div>
         </div>
 
-        {/* Sidebar Column */}
         <div className="space-y-6">
           <div className={`p-6 rounded-2xl border ${cardBg}`}>
             <h3 className="text-lg font-semibold mb-4 flex items-center"><ImageIcon className="mr-2" size={20}/> Recent Site Photos</h3>
@@ -505,105 +514,29 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
   );
 }
 
-function StatCard({ title, value, subtext, icon: Icon, color, bg }) {
-  return (
-    <div className={`p-6 rounded-2xl border ${bg} flex flex-col`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className={`p-3 rounded-xl bg-opacity-10 ${color.replace('text-', 'bg-')}`}><Icon size={24} className={color} /></div>
-      </div>
-      <h4 className="text-slate-500 text-sm font-medium mb-1">{title}</h4>
-      <span className="text-2xl font-bold mb-1">{value}</span>
-      <span className="text-xs text-slate-400 font-medium">{subtext}</span>
-    </div>
-  );
-}
-
-function MilestoneItem({ title, status, date, progress }) {
-  const statusColors = { 'completed': 'text-emerald-500', 'in-progress': 'text-blue-500', 'upcoming': 'text-slate-500' };
-  return (
-    <div className="relative pl-6 border-l-2 border-slate-700 pb-2 last:border-0 last:pb-0">
-      <div className={`absolute -left-[9px] top-0 bg-slate-900 rounded-full p-0.5 ${statusColors[status]}`}>
-        {status === 'completed' ? <CheckCircle2 size={16} className="bg-emerald-500 text-white rounded-full" /> : <div className={`w-3 h-3 rounded-full border-2 ${status === 'in-progress' ? 'border-blue-500 bg-blue-500' : 'border-slate-500 bg-slate-800'}`}></div>}
-      </div>
-      <div className="-mt-1.5">
-        <h5 className={`font-semibold text-sm ${status === 'upcoming' ? 'text-slate-400' : ''}`}>{title}</h5>
-        <p className="text-xs text-slate-500 mt-0.5">{date}</p>
-        {status === 'in-progress' && progress > 0 && (
-          <div className="mt-3 w-full bg-slate-700 rounded-full h-1.5"><div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${progress}%` }}></div></div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PhotosView({ photos, role, onUpload, darkMode }) {
-  const fileInputRef = useRef(null);
-  const [isUploading, setIsUploading] = useState(false);
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setIsUploading(true);
-    await onUpload(file);
-    setIsUploading(false);
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold">Progress Photos</h2>
-          <p className="text-sm text-slate-500">Live feed from the field</p>
-        </div>
-        {role === 'contractor' && (
-          <>
-            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
-            <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors disabled:opacity-50">
-              {isUploading ? "Uploading..." : <><Upload size={18} className="mr-2" /> Upload Photo</>}
-            </button>
-          </>
-        )}
-      </div>
-
-      {photos.length === 0 ? (
-        <div className={`p-12 text-center rounded-2xl border border-dashed ${darkMode ? 'border-slate-700 text-slate-500' : 'border-slate-300 text-slate-400'}`}>
-          <Camera size={48} className="mx-auto mb-4 opacity-50" />
-          <p>No photos have been uploaded to the live feed yet.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
-          {photos.map(photo => (
-            <div key={photo.id} className={`rounded-xl overflow-hidden border ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
-              <div className="aspect-[4/3] relative">
-                <a href={photo.url} target="_blank" rel="noopener noreferrer">
-                  <img src={photo.url} alt="Site" className="absolute inset-0 w-full h-full object-cover hover:opacity-90 transition-opacity" />
-                </a>
-              </div>
-              <div className="p-3">
-                <p className="text-xs text-slate-500 flex justify-between">
-                  <span>{photo.createdAt?.toDate().toLocaleDateString() || 'Just now'}</span>
-                  <span className="capitalize font-medium">{photo.uploaderRole}</span>
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MessagesView({ messages, role, onSend, darkMode, user }) {
+function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpload }) {
   const [activeTab, setActiveTab] = useState(role === 'admin' ? 'admin' : 'contractor');
   const [newMsg, setNewMsg] = useState("");
+  const [showAttachments, setShowAttachments] = useState(false);
+  const [showMentions, setShowMentions] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const filteredMessages = messages.filter(m => m.portalThread === activeTab);
+  
+  // Get visible files for the attachment dropdown
+  const visibleFiles = files ? (role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin')) : [];
+  
+  // Get unique users in the current thread for the tagging dropdown
+  const uniqueUsers = Array.from(new Set(filteredMessages.map(m => m.authorEmail))).filter(email => email && email !== 'Unknown User');
 
   const handleSend = (e) => {
     e.preventDefault();
     onSend(newMsg, activeTab);
     setNewMsg("");
+    setShowAttachments(false);
+    setShowMentions(false);
   };
 
   useEffect(() => {
@@ -612,16 +545,57 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
 
-  // Format date nicely (e.g. "Mar 13 at 2:30 PM")
   const formatTimestamp = (fbTimestamp) => {
     if (!fbTimestamp) return 'Sending...';
     const date = fbTimestamp.toDate();
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
   };
 
+  // Parses [FileName](url) links and @user tags into HTML
+  const formatMessageContent = (text) => {
+    if (!text) return { __html: '' };
+    let html = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      // Match markdown-style links for documents
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:text-blue-400 underline font-semibold break-all">📎 $1</a>`)
+      // Match @email tags
+      .replace(/(@[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|@[a-zA-Z0-9_-]+)/g, `<span class="bg-blue-500/20 text-blue-500 px-1 rounded font-bold">$1</span>`);
+    return { __html: html };
+  };
+
+  const insertAttachment = (file) => {
+    setNewMsg(prev => prev + (prev.endsWith(' ') || prev === '' ? '' : ' ') + `[${file.name}](${file.downloadUrl}) `);
+    setShowAttachments(false);
+  };
+
+  const insertMention = (email) => {
+    setNewMsg(prev => prev + (prev.endsWith(' ') || prev === '' ? '' : ' ') + `@${email} `);
+    setShowMentions(false);
+  };
+
+  const handleDirectUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    setIsUploading(true);
+    setShowAttachments(false);
+
+    // If Admin uploads a file directly to the Admin board, lock it down to admins. Otherwise public.
+    const isAdminOnly = role === 'admin' && activeTab === 'admin';
+    const result = await onFileUpload(file, 'Message Board Attachment', isAdminOnly);
+
+    if (result) {
+      setNewMsg(prev => prev + (prev.endsWith(' ') || prev === '' ? '' : ' ') + `[${result.name}](${result.downloadUrl}) `);
+    }
+    
+    setIsUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
     <div className={`flex flex-col h-[calc(100vh-8rem)] rounded-2xl border ${bgStyle} overflow-hidden`}>
-      {/* Tabs for Admins */}
       {role === 'admin' && (
         <div className={`flex border-b ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'}`}>
           <button onClick={() => setActiveTab('admin')} className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'admin' ? 'border-b-2 border-blue-500 text-blue-500' : 'text-slate-500 hover:text-slate-300'}`}>Admin Board</button>
@@ -629,7 +603,6 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
         </div>
       )}
 
-      {/* Messages Area */}
       <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${darkMode ? 'bg-slate-950' : 'bg-slate-50'}`}>
         {filteredMessages.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-500 text-sm">No messages yet. Be the first to post!</div>
@@ -638,17 +611,16 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
             const isMe = msg.authorId === user.uid;
             return (
               <div key={msg.id || i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                {/* Meta Data: Role, Email, Timestamp */}
                 <div className={`flex items-baseline space-x-2 mb-1 px-1 ${isMe ? 'flex-row-reverse space-x-reverse' : 'flex-row'}`}>
                   {!isMe && <span className={`text-xs font-bold capitalize ${msg.authorRole === 'admin' ? 'text-blue-400' : 'text-amber-500'}`}>{msg.authorRole}</span>}
                   <span className="text-xs text-slate-400 font-medium">{isMe ? 'You' : msg.authorEmail}</span>
                   <span className="text-[10px] text-slate-500">{formatTimestamp(msg.createdAt)}</span>
                 </div>
                 
-                {/* Message Bubble */}
-                <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (darkMode ? 'bg-slate-800 text-slate-200 rounded-bl-none' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-sm')}`}>
-                  {msg.text}
-                </div>
+                <div 
+                  className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (darkMode ? 'bg-slate-800 text-slate-200 rounded-bl-none' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-sm')}`}
+                  dangerouslySetInnerHTML={formatMessageContent(msg.text)}
+                />
               </div>
             );
           })
@@ -656,18 +628,90 @@ function MessagesView({ messages, role, onSend, darkMode, user }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div className={`p-4 border-t ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
-        <form onSubmit={handleSend} className="relative flex items-center">
+      <div className={`p-4 border-t ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'} relative`}>
+        
+        {/* Attachments Dropdown Menu */}
+        {showAttachments && (
+          <div className={`absolute bottom-[110%] left-4 mb-2 w-72 max-h-64 overflow-y-auto rounded-xl shadow-xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} p-2 z-10`}>
+            <div className="text-xs font-bold text-slate-500 mb-2 px-2 uppercase flex justify-between items-center">
+              <span>Attach File</span>
+              <button onClick={() => setShowAttachments(false)}><X size={14}/></button>
+            </div>
+            
+            <button 
+              type="button" 
+              onClick={() => fileInputRef.current?.click()} 
+              className="w-full text-left px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold mb-2 flex items-center justify-center transition-colors"
+            >
+              <Upload size={14} className="mr-2" /> Upload New File
+            </button>
+            <div className={`border-t my-2 ${darkMode ? 'border-slate-700' : 'border-slate-200'}`}></div>
+
+            {visibleFiles.length === 0 ? (
+              <p className="text-xs text-slate-500 px-2 pb-2">No existing files to attach.</p>
+            ) : (
+              visibleFiles.map(f => (
+                <button key={f.id} type="button" onClick={() => insertAttachment(f)} className={`w-full text-left px-3 py-2 hover:bg-blue-500/10 rounded-lg text-sm truncate transition-colors ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  📎 {f.name}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Mentions Dropdown Menu */}
+        {showMentions && (
+          <div className={`absolute bottom-[110%] left-14 mb-2 w-64 max-h-48 overflow-y-auto rounded-xl shadow-xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} p-2 z-10`}>
+            <div className="text-xs font-bold text-slate-500 mb-2 px-2 uppercase flex justify-between">
+              <span>Tag User</span>
+              <button onClick={() => setShowMentions(false)}><X size={14}/></button>
+            </div>
+            {uniqueUsers.length === 0 ? (
+              <p className="text-xs text-slate-500 px-2 pb-2">No other users in this thread yet.</p>
+            ) : (
+              uniqueUsers.map(email => (
+                <button key={email} type="button" onClick={() => insertMention(email)} className={`w-full text-left px-3 py-2 hover:bg-blue-500/10 rounded-lg text-sm truncate transition-colors ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                  @ {email}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
+        <form onSubmit={handleSend} className="relative flex items-center space-x-2">
+          {/* Hidden File Input for Direct Uploads */}
+          <input type="file" className="hidden" ref={fileInputRef} onChange={handleDirectUpload} />
+
+          {/* Action Buttons */}
+          <div className="flex space-x-1">
+            <button 
+              type="button" 
+              disabled={isUploading}
+              onClick={() => { setShowAttachments(!showAttachments); setShowMentions(false); }} 
+              className={`p-2 rounded-lg transition-colors ${showAttachments ? 'bg-blue-500/20 text-blue-500' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'} disabled:opacity-50`}
+              title="Attach File"
+            >
+              {isUploading ? <Loader2 size={20} className="animate-spin text-blue-500" /> : <Paperclip size={20} />}
+            </button>
+            <button 
+              type="button" 
+              onClick={() => { setShowMentions(!showMentions); setShowAttachments(false); }} 
+              className={`p-2 rounded-lg transition-colors ${showMentions ? 'bg-blue-500/20 text-blue-500' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+              title="Tag User"
+            >
+              <AtSign size={20} />
+            </button>
+          </div>
+
           <input
             type="text"
             value={newMsg}
             onChange={(e) => setNewMsg(e.target.value)}
             placeholder={`Type a message in ${activeTab} thread...`}
-            className={`w-full py-3 pl-4 pr-12 rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-100 border-slate-300 text-slate-900'}`}
+            className={`flex-1 py-3 px-4 rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-100 border-slate-300 text-slate-900'}`}
           />
-          <button type="submit" disabled={!newMsg.trim()} className="absolute right-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-            <Send size={18} />
+          <button type="submit" disabled={!newMsg.trim()} className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex-shrink-0">
+            <Send size={20} />
           </button>
         </form>
       </div>
@@ -679,17 +723,40 @@ function FilesView({ files, role, onUpload, darkMode }) {
   const visibleFiles = role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin');
   const fileInputRef = useRef(null);
   const [isUploading, setIsUploading] = useState(false);
+  
+  // New States for the Upload Modal
+  const [showModal, setShowModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [category, setCategory] = useState('Working drawings');
+  const [adminOnly, setAdminOnly] = useState(false);
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const CATEGORIES = [
+    'RFI', 'Permit drawings', 'Documents from governing bodies', 
+    'Working drawings', 'Engineering reports', 'Invoices', 'General'
+  ];
+
+  const handleFileSelect = (e) => {
+    if (e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+      setShowModal(true); // Open the modal instead of uploading instantly
+    }
+  };
+
+  const handleConfirmUpload = async () => {
+    if (!selectedFile) return;
     setIsUploading(true);
-    await onUpload(file);
+    setShowModal(false);
+    // Pass the extra categorization data up to the database
+    await onUpload(selectedFile, category, adminOnly);
     setIsUploading(false);
+    setSelectedFile(null);
+    setCategory('Working drawings');
+    setAdminOnly(false);
   };
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
   const headerStyle = darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-600';
+  const inputBg = darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900';
 
   return (
     <div className="space-y-6">
@@ -699,12 +766,50 @@ function FilesView({ files, role, onUpload, darkMode }) {
           <p className="text-sm text-slate-500">Secure, versioned file repository</p>
         </div>
         <div>
-          <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+          <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
           <button onClick={() => fileInputRef.current.click()} disabled={isUploading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center transition-colors disabled:opacity-50">
             {isUploading ? "Uploading..." : <><Upload size={18} className="mr-2" /> Upload File</>}
           </button>
         </div>
       </div>
+
+      {/* Pop-up Modal for Categorizing the Upload */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className={`w-full max-w-md p-6 rounded-2xl shadow-xl border ${bgStyle}`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Upload Details</h3>
+              <button onClick={() => { setShowModal(false); setSelectedFile(null); }} className="text-slate-500 hover:text-slate-300"><X size={20}/></button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1 text-slate-400">Selected File</label>
+                <div className={`p-3 rounded-lg border ${inputBg} text-sm truncate`}>{selectedFile?.name}</div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1 text-slate-400">Category</label>
+                <select value={category} onChange={e => setCategory(e.target.value)} className={`w-full p-3 rounded-lg border ${inputBg}`}>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              {/* Only allow Admins to hide files from contractors */}
+              {role === 'admin' && (
+                <label className="flex items-center space-x-3 cursor-pointer">
+                  <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
+                  <span className="text-sm font-medium">Make this file visible to Admins only</span>
+                </label>
+              )}
+
+              <button onClick={handleConfirmUpload} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors mt-4">
+                Confirm & Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className={`rounded-2xl border ${bgStyle} overflow-hidden`}>
         <div className="overflow-x-auto">
@@ -712,6 +817,7 @@ function FilesView({ files, role, onUpload, darkMode }) {
             <thead>
               <tr className={`${headerStyle} border-b ${darkMode ? 'border-slate-800' : 'border-slate-200'} text-xs uppercase tracking-wider`}>
                 <th className="p-4 font-semibold">File Name</th>
+                <th className="p-4 font-semibold">Category</th>
                 <th className="p-4 font-semibold">Size</th>
                 <th className="p-4 font-semibold">Uploaded By</th>
                 <th className="p-4 font-semibold">Date</th>
@@ -720,16 +826,21 @@ function FilesView({ files, role, onUpload, darkMode }) {
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {visibleFiles.length === 0 ? (
-                <tr><td colSpan="5" className="p-8 text-center text-slate-500">No files uploaded yet.</td></tr>
+                <tr><td colSpan="6" className="p-8 text-center text-slate-500">No files uploaded yet.</td></tr>
               ) : (
                 visibleFiles.map(file => (
                   <tr key={file.id} className={`transition-colors ${darkMode ? 'hover:bg-slate-800/50 divide-slate-800' : 'hover:bg-slate-50 divide-slate-200 border-b'}`}>
                     <td className="p-4">
                       <div className="flex items-center space-x-3">
                         <FileText size={20} className={file.type === 'PDF' ? 'text-red-400' : 'text-blue-400'} />
-                        <div><p className="font-medium text-sm">{file.name}</p></div>
+                        <div>
+                          <p className="font-medium text-sm max-w-[200px] truncate">{file.name}</p>
+                          {/* Red badge to show admins which files are hidden from contractors */}
+                          {file.portalAccess === 'admin' && <span className="inline-block px-2 py-0.5 mt-1 bg-red-500/20 text-red-400 text-[10px] font-bold rounded uppercase tracking-wider">Admin Only</span>}
+                        </div>
                       </div>
                     </td>
+                    <td className="p-4 text-sm"><span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs whitespace-nowrap">{file.category || 'General'}</span></td>
                     <td className="p-4 text-sm text-slate-500">{file.size}</td>
                     <td className="p-4 text-sm capitalize">{file.uploadedBy}</td>
                     <td className="p-4 text-sm text-slate-500">{file.createdAt?.toDate().toLocaleDateString() || 'Today'}</td>
@@ -794,5 +905,7 @@ function SettingsView({ darkMode }) {
         </div>
       </div>
     </div>
+  );
+}
   );
 }
