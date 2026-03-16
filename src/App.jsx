@@ -220,7 +220,7 @@ export default function App() {
     }
   };
 
-  const addMessage = async (text, portalThread) => {
+  const addMessage = async (text, portalThread, isPrivate = false) => {
     if (!text.trim()) return;
     try {
       await addDoc(collection(db, 'messages'), {
@@ -229,6 +229,7 @@ export default function App() {
         authorEmail: user.email || 'Unknown User',
         authorRole: role,
         portalThread, 
+        isPrivate,
         createdAt: serverTimestamp()
       });
       triggerNotification("Message Sent", `Posted to ${portalThread} board.`);
@@ -697,6 +698,7 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
   const [showAttachments, setShowAttachments] = useState(false);
   const [showMentions, setShowMentions] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPrivateMsg, setIsPrivateMsg] = useState(false);
   
   // Category Upload Modal State
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -707,7 +709,16 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const filteredMessages = messages.filter(m => m.portalThread === activeTab);
+  const filteredMessages = messages.filter(m => {
+    if (m.portalThread !== activeTab) return false;
+    
+    // Hide private messages from users who are not Admins, not the Author, and not @mentioned
+    if (m.isPrivate && role !== 'admin' && m.authorId !== user.uid && (!user?.email || !m.text.includes(user.email))) {
+      return false;
+    }
+    
+    return true;
+  });
   
   // Allow the user to see admin files IF they are an admin OR if they are the one who uploaded it
   const visibleFiles = files ? (role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin' || f.uploadedBy === user?.email)) : [];
@@ -719,10 +730,11 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
 
   const handleSend = (e) => {
     e.preventDefault();
-    onSend(newMsg, activeTab);
+    onSend(newMsg, activeTab, isPrivateMsg);
     setNewMsg("");
     setShowAttachments(false);
     setShowMentions(false);
+    setIsPrivateMsg(false); // Reset private toggle after sending
   };
 
   useEffect(() => {
@@ -818,6 +830,7 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
                   {!isMe && <span className={`text-xs font-bold capitalize ${msg.authorRole === 'admin' ? 'text-blue-400' : 'text-amber-500'}`}>{msg.authorRole}</span>}
                   <span className="text-xs text-slate-400 font-medium">{isMe ? 'You' : msg.authorEmail}</span>
                   <span className="text-[10px] text-slate-500">{formatTimestamp(msg.createdAt)}</span>
+                  {msg.isPrivate && <span className="text-[10px] bg-red-500/20 text-red-500 px-1.5 py-0.5 rounded font-bold uppercase">Private</span>}
                 </div>
                 
                 <div 
@@ -915,39 +928,54 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
           </div>
         )}
 
-        <form onSubmit={handleSend} className="relative flex items-center space-x-2">
-          <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
-
-          <div className="flex space-x-1">
-            <button 
-              type="button" 
-              disabled={isUploading}
-              onClick={() => { setShowAttachments(!showAttachments); setShowMentions(false); }} 
-              className={`p-2 rounded-lg transition-colors ${showAttachments ? 'bg-blue-500/20 text-blue-500' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'} disabled:opacity-50`}
-              title="Attach File"
-            >
-              {isUploading ? <Loader2 size={20} className="animate-spin text-blue-500" /> : <Paperclip size={20} />}
-            </button>
-            <button 
-              type="button" 
-              onClick={() => { setShowMentions(!showMentions); setShowAttachments(false); }} 
-              className={`p-2 rounded-lg transition-colors ${showMentions ? 'bg-blue-500/20 text-blue-500' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
-              title="Tag User"
-            >
-              <AtSign size={20} />
-            </button>
+        <form onSubmit={handleSend} className="relative flex flex-col space-y-2 w-full mt-2">
+          
+          <div className="flex items-center px-1">
+            <label className="flex items-center space-x-2 text-xs text-slate-500 hover:text-slate-400 cursor-pointer w-max transition-colors">
+              <input 
+                type="checkbox" 
+                checked={isPrivateMsg} 
+                onChange={(e) => setIsPrivateMsg(e.target.checked)} 
+                className={`w-4 h-4 rounded focus:ring-blue-500 ${darkMode ? 'border-slate-600 bg-slate-800 text-blue-600' : 'border-slate-300 bg-white text-blue-600'}`} 
+              />
+              <span>🔒 Make private (Visible to Admins & @Tagged users only)</span>
+            </label>
           </div>
 
-          <input
-            type="text"
-            value={newMsg}
-            onChange={(e) => setNewMsg(e.target.value)}
-            placeholder={`Type a message in ${activeTab} thread...`}
-            className={`flex-1 py-3 px-4 rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-100 border-slate-300 text-slate-900'}`}
-          />
-          <button type="submit" disabled={!newMsg.trim()} className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex-shrink-0">
-            <Send size={20} />
-          </button>
+          <div className="relative flex items-center space-x-2 w-full">
+            <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
+
+            <div className="flex space-x-1">
+              <button 
+                type="button" 
+                disabled={isUploading}
+                onClick={() => { setShowAttachments(!showAttachments); setShowMentions(false); }} 
+                className={`p-2 rounded-lg transition-colors ${showAttachments ? 'bg-blue-500/20 text-blue-500' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'} disabled:opacity-50`}
+                title="Attach File"
+              >
+                {isUploading ? <Loader2 size={20} className="animate-spin text-blue-500" /> : <Paperclip size={20} />}
+              </button>
+              <button 
+                type="button" 
+                onClick={() => { setShowMentions(!showMentions); setShowAttachments(false); }} 
+                className={`p-2 rounded-lg transition-colors ${showMentions ? 'bg-blue-500/20 text-blue-500' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+                title="Tag User"
+              >
+                <AtSign size={20} />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={newMsg}
+              onChange={(e) => setNewMsg(e.target.value)}
+              placeholder={`Type a message in ${activeTab} thread...`}
+              className={`flex-1 py-3 px-4 rounded-xl border focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-100 border-slate-300 text-slate-900'}`}
+            />
+            <button type="submit" disabled={!newMsg.trim()} className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex-shrink-0">
+              <Send size={20} />
+            </button>
+          </div>
         </form>
       </div>
     </div>
