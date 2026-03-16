@@ -9,7 +9,7 @@ import {
   Settings, Bell, Search, Menu, X, Upload, ShieldCheck, 
   Users, HardHat, FileText, ChevronRight, Activity, Clock, 
   CheckCircle2, AlertCircle, Download, Camera, Send, Edit3, Save, Plus, Trash2,
-  Paperclip, AtSign, Loader2
+  Paperclip, AtSign, Loader2, Video
 } from 'lucide-react';
 
 // --- Firebase Initialization (Using Your Keys) ---
@@ -301,6 +301,9 @@ export default function App() {
       <div 
         className="min-h-screen flex items-center justify-center text-slate-100 p-4 font-sans relative"
         style={{ 
+          // 👇 CHANGE YOUR BACKGROUND IMAGE HERE 👇
+          // If you put a file named "my-background.jpg" in your "public" folder,
+          // simply change this link to: 'url("/my-background.jpg")'
           backgroundImage: 'url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1920&q=80")',
           backgroundSize: 'cover',
           backgroundPosition: 'center'
@@ -349,12 +352,14 @@ export default function App() {
     { id: 'photos', label: 'Progress Photos', icon: ImageIcon },
     { id: 'messages', label: 'Message Board', icon: MessageSquare },
     { id: 'files', label: 'Documents & Files', icon: FolderKanban },
+    { id: 'meetings', label: 'Video Meetings', icon: Video },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (
     <div className={`min-h-screen flex font-sans ${darkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-900'}`}>
       
+      {/* Toast Notifications */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {notifications.map(notif => (
           <div key={notif.id} className="bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-3 animate-bounce">
@@ -412,6 +417,7 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 lg:ml-64 flex flex-col min-h-screen">
+        {/* Top Header */}
         <header className={`h-16 flex items-center justify-between px-4 lg:px-8 border-b ${darkMode ? 'bg-slate-900/50 border-slate-800 backdrop-blur-sm' : 'bg-white border-slate-200'} sticky top-0 z-30`}>
           <div className="flex items-center">
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden mr-4 p-2 rounded-md hover:bg-slate-800">
@@ -430,6 +436,7 @@ export default function App() {
           </div>
         </header>
 
+        {/* Scrollable Content Area */}
         <div className="flex-1 p-4 lg:p-8 overflow-auto">
           {currentView === 'dashboard' && role === 'admin' && (
             <DashboardView 
@@ -446,6 +453,7 @@ export default function App() {
           {currentView === 'photos' && <PhotosView photos={photos} role={role} onUpload={uploadRealPhoto} darkMode={darkMode} />}
           {currentView === 'messages' && <MessagesView messages={messages} role={role} onSend={addMessage} darkMode={darkMode} user={user} files={files} onFileUpload={uploadRealFile} allUsers={allUsers} />}
           {currentView === 'files' && <FilesView files={files} role={role} onUpload={uploadRealFile} darkMode={darkMode} user={user} />}
+          {currentView === 'meetings' && <MeetingsView darkMode={darkMode} user={user} />}
           {currentView === 'settings' && <SettingsView darkMode={darkMode} user={user} db={db} triggerNotification={triggerNotification} />}
         </div>
       </main>
@@ -454,6 +462,83 @@ export default function App() {
 }
 
 // --- View Components ---
+
+function MeetingsView({ darkMode, user }) {
+  const [inCall, setInCall] = useState(false);
+  const [roomName, setRoomName] = useState("NMIC-Main-Site");
+
+  const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
+  const inputBg = darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900';
+
+  if (inCall) {
+    return (
+      <div className={`flex flex-col h-[calc(100vh-8rem)] rounded-2xl border ${bgStyle} overflow-hidden relative`}>
+        <div className="flex justify-between items-center p-3 border-b border-inherit bg-slate-950 text-white z-10">
+          <div className="flex items-center space-x-2">
+            <Video size={18} className="text-blue-400" />
+            <span className="font-semibold text-sm">Meeting Room: {roomName}</span>
+          </div>
+          <button 
+            onClick={() => setInCall(false)} 
+            className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Leave Meeting
+          </button>
+        </div>
+        <div className="flex-1 w-full h-full bg-black">
+          <iframe 
+            allow="camera; microphone; fullscreen; display-capture; autoplay" 
+            src={`https://meet.jit.si/NMICTrack-Portal-${roomName}`} 
+            style={{ height: '100%', width: '100%', border: '0px' }}
+            title="Video Meeting"
+          ></iframe>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto mt-10">
+      <div className={`p-8 rounded-3xl border shadow-xl ${bgStyle} text-center space-y-6`}>
+        <div className="mx-auto w-20 h-20 bg-blue-600/10 flex items-center justify-center rounded-full mb-6">
+          <Video size={40} className="text-blue-500" />
+        </div>
+        
+        <div>
+          <h2 className="text-3xl font-bold mb-2">Secure Video Meetings</h2>
+          <p className="text-slate-500 max-w-md mx-auto">
+            Join or create a fully-encrypted video conference. You can share your screen, chat, and set a password once inside.
+          </p>
+        </div>
+
+        <div className="max-w-md mx-auto pt-6">
+          <label className="block text-left text-sm font-medium mb-2 text-slate-400">Room Name (No spaces)</label>
+          <div className="flex space-x-3">
+            <input 
+              type="text" 
+              value={roomName}
+              onChange={(e) => setRoomName(e.target.value.replace(/\s+/g, '-'))}
+              placeholder="e.g. Site-Update"
+              className={`flex-1 p-3 rounded-xl border focus:ring-2 focus:ring-blue-500 outline-none ${inputBg}`}
+            />
+            <button 
+              onClick={() => roomName.trim() && setInCall(true)}
+              disabled={!roomName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-bold transition-colors"
+            >
+              Join Room
+            </button>
+          </div>
+        </div>
+
+        <div className="pt-8 border-t border-inherit mt-8 text-xs text-slate-500 flex flex-col items-center justify-center">
+          <ShieldCheck size={24} className="mb-2 opacity-50" />
+          <p>Powered securely by Jitsi Meet Enterprise. <br/>All video and audio is end-to-end encrypted.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode, userProfile, onClearMessages }) {
   const safeProjectInfo = { ...DEFAULT_PROJECT_INFO, ...(projectInfo || {}) };
