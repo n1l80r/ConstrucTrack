@@ -477,6 +477,9 @@ function MeetingsView({ darkMode, user }) {
           <div className="flex items-center space-x-2">
             <Video size={18} className="text-blue-400" />
             <span className="font-semibold text-sm">Meeting Room: {roomName}</span>
+            <span className="hidden md:inline-block ml-4 text-[10px] bg-blue-500/20 text-blue-300 px-2 py-1 rounded border border-blue-500/30">
+              Host must log in to unlock unlimited time
+            </span>
           </div>
           <button 
             onClick={() => setInCall(false)} 
@@ -533,7 +536,14 @@ function MeetingsView({ darkMode, user }) {
 
         <div className="pt-8 border-t border-inherit mt-8 text-xs text-slate-500 flex flex-col items-center justify-center">
           <ShieldCheck size={24} className="mb-2 opacity-50" />
-          <p>Powered securely by Jitsi Meet Enterprise. <br/>All video and audio is end-to-end encrypted.</p>
+          <p className="mb-4">Powered securely by Jitsi Meet Enterprise. All video and audio is end-to-end encrypted.</p>
+          
+          <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-blue-900/20 border-blue-800/50 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+            <strong className="block mb-1 font-bold flex items-center">
+              <Clock size={16} className="mr-1" /> Bypassing the 5-Minute Limit
+            </strong>
+            To stop spam, Jitsi limits fully anonymous rooms to 5 minutes. To get <strong>unlimited meeting time</strong>, the first person in the room simply needs to click <strong>"I am the host"</strong> inside the video window and log in with a free Google or GitHub account.
+          </div>
         </div>
       </div>
     </div>
