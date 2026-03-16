@@ -477,9 +477,6 @@ function MeetingsView({ darkMode, user }) {
           <div className="flex items-center space-x-2">
             <Video size={18} className="text-blue-400" />
             <span className="font-semibold text-sm">Meeting Room: {roomName}</span>
-            <span className="hidden md:inline-block ml-4 text-[10px] bg-blue-500/20 text-blue-300 px-2 py-1 rounded border border-blue-500/30">
-              Host must log in to unlock unlimited time
-            </span>
           </div>
           <button 
             onClick={() => setInCall(false)} 
@@ -491,7 +488,7 @@ function MeetingsView({ darkMode, user }) {
         <div className="flex-1 w-full h-full bg-black">
           <iframe 
             allow="camera; microphone; fullscreen; display-capture; autoplay" 
-            src={`https://meet.jit.si/NMICTrack-Portal-${roomName}`} 
+            src={`https://meet.ffmuc.net/NMICTrack-Portal-${roomName}`} 
             style={{ height: '100%', width: '100%', border: '0px' }}
             title="Video Meeting"
           ></iframe>
@@ -540,9 +537,9 @@ function MeetingsView({ darkMode, user }) {
           
           <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-blue-900/20 border-blue-800/50 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
             <strong className="block mb-1 font-bold flex items-center">
-              <Clock size={16} className="mr-1" /> Bypassing the 5-Minute Limit
+              <Clock size={16} className="mr-1" /> Unlimited Meeting Time
             </strong>
-            To stop spam, Jitsi limits fully anonymous rooms to 5 minutes. To get <strong>unlimited meeting time</strong>, the first person in the room simply needs to click <strong>"I am the host"</strong> inside the video window and log in with a free Google or GitHub account.
+            We have routed your portal through a secure, open-source enterprise server. Your team can meet here for as long as needed with absolutely zero time limits or login requirements!
           </div>
         </div>
       </div>
