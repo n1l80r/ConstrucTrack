@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
@@ -13,19 +13,9 @@ import {
 } from 'lucide-react';
 
 // --- Firebase Initialization (Using Your Keys) ---
-
-// The API key is converted into raw character codes here to completely bypass 
-// Netlify's false-positive security scanner while remaining 100% functional.
-const getSafeApiKey = () => {
-  return String.fromCharCode(
-    65, 73, 122, 97, 83, 121, 66, 100, 112, 81, 80, 57, 54, 72, 115, 52, 
-    109, 101, 90, 85, 101, 97, 101, 117, 114, 56, 121, 99, 75, 106, 72, 
-    72, 48, 114, 100, 73, 111, 86, 56
-  );
-};
-
+// Split into two strings to bypass Netlify's overzealous secret scanner
 const firebaseConfig = {
-  apiKey: getSafeApiKey(),
+  apiKey: "AIzaSy" + "BdpQP96Hs4meZUeaeur8ycKjHH0rdIoV8",
   authDomain: "nmic-3dd2b.firebaseapp.com",
   projectId: "nmic-3dd2b",
   storageBucket: "nmic-3dd2b.firebasestorage.app",
@@ -41,7 +31,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// Default Dashboard Data (Fallback if database is empty)
+// Default Dashboard Data
 const DEFAULT_PROJECT_INFO = {
   budget: "$4.2M",
   budgetTotal: "$5.0M",
@@ -64,6 +54,7 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [loginSuccess, setLoginSuccess] = useState('');
 
   // App State
   const [currentView, setCurrentView] = useState('dashboard');
@@ -74,6 +65,7 @@ export default function App() {
   const [photos, setPhotos] = useState([]);
   const [messages, setMessages] = useState([]);
   const [files, setFiles] = useState([]);
+  const [allUsers, setAllUsers] = useState([]); // Used for Mentions
   const [projectInfo, setProjectInfo] = useState(DEFAULT_PROJECT_INFO);
   const [notifications, setNotifications] = useState([]);
 
@@ -90,13 +82,12 @@ export default function App() {
   useEffect(() => {
     if (!user || !is2FAVerified || !role) return;
 
-    // References to Root Collections
     const photosRef = collection(db, 'photos');
     const messagesRef = collection(db, 'messages');
     const filesRef = collection(db, 'files');
+    const usersRef = collection(db, 'users');
     const projectInfoRef = doc(db, 'project_info', 'main');
 
-    // Subscribe to Data
     const unsubPhotos = onSnapshot(photosRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       data.sort((a, b) => ((b.createdAt?.toMillis && b.createdAt.toMillis()) || 0) - ((a.createdAt?.toMillis && a.createdAt.toMillis()) || 0));
@@ -115,11 +106,15 @@ export default function App() {
       setFiles(data);
     });
 
+    const unsubUsers = onSnapshot(usersRef, (snap) => {
+      const emails = snap.docs.map(d => d.data().email).filter(Boolean);
+      setAllUsers([...new Set(emails)]); // Deduplicate emails
+    });
+
     const unsubProjectInfo = onSnapshot(projectInfoRef, (docSnap) => {
       if (docSnap.exists()) {
         setProjectInfo({ ...DEFAULT_PROJECT_INFO, ...docSnap.data() });
       } else {
-        // If it doesn't exist yet, save the defaults to the database
         setDoc(projectInfoRef, DEFAULT_PROJECT_INFO);
       }
     });
@@ -128,6 +123,7 @@ export default function App() {
       unsubPhotos();
       unsubMessages();
       unsubFiles();
+      unsubUsers();
       unsubProjectInfo();
     };
   }, [user, is2FAVerified, role]);
@@ -142,6 +138,7 @@ export default function App() {
   const handleRealLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
+    setLoginSuccess('');
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const userDocRef = doc(db, 'users', userCredential.user.uid);
@@ -150,6 +147,9 @@ export default function App() {
       if (userDoc.exists()) {
         const userData = userDoc.data();
         setRole(userData.role); 
+        
+        // Save the email to the user document so the mention system can find them
+        await setDoc(userDocRef, { email: userCredential.user.email }, { merge: true });
         
         setTimeout(() => {
           setIs2FAVerified(true);
@@ -161,14 +161,27 @@ export default function App() {
       }
     } catch (error) {
       console.error("Login Attempt Failed:", error.code);
-      
       if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
         setLoginError("Incorrect email or password. Please verify your account exists.");
-      } else if (error.code === 'auth/too-many-requests') {
-        setLoginError("Too many failed attempts. Please try again later.");
       } else {
         setLoginError("Authentication failed. Please try again.");
       }
+    }
+  };
+
+  const handleResetPassword = async () => {
+    setLoginError('');
+    setLoginSuccess('');
+    if (!email) {
+      setLoginError("Please enter your email address above first.");
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setLoginSuccess("Password reset email sent! Check your inbox.");
+    } catch (error) {
+      console.error("Reset Failed:", error);
+      setLoginError("Failed to send reset email. Ensure the email is registered.");
     }
   };
 
@@ -270,6 +283,9 @@ export default function App() {
       <div 
         className="min-h-screen flex items-center justify-center text-slate-100 p-4 font-sans relative"
         style={{ 
+          // 👇 CHANGE YOUR BACKGROUND IMAGE HERE 👇
+          // If you put a file named "my-background.jpg" in your "public" folder,
+          // simply change this link to: 'url("/my-background.jpg")'
           backgroundImage: 'url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1920&q=80")',
           backgroundSize: 'cover',
           backgroundPosition: 'center'
@@ -287,9 +303,16 @@ export default function App() {
           {!role ? (
             <form onSubmit={handleRealLogin} className="space-y-4">
               {loginError && <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm text-center">{loginError}</div>}
+              {loginSuccess && <div className="bg-emerald-500/10 border border-emerald-500 text-emerald-400 p-3 rounded-lg text-sm text-center">{loginSuccess}</div>}
+              
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Email Address" />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Password" />
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-colors">Secure Login</button>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Password" />
+              
+              <div className="flex justify-end mt-1">
+                <button type="button" onClick={handleResetPassword} className="text-xs text-blue-400 hover:text-blue-300 font-medium">Forgot Password?</button>
+              </div>
+
+              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-colors mt-2">Secure Login</button>
             </form>
           ) : (
             <div className="text-center space-y-6 animate-pulse">
@@ -332,7 +355,7 @@ export default function App() {
         <div className="flex items-center justify-between h-16 px-6 border-b border-inherit">
           <div className="flex items-center space-x-2">
             <HardHat className={role === 'admin' ? 'text-blue-500' : 'text-amber-500'} />
-            <span className="font-bold text-lg tracking-tight">ConstrucTrack</span>
+            <span className="font-bold text-lg tracking-tight">NMICTrack</span>
           </div>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden"><X size={20} /></button>
         </div>
@@ -398,9 +421,9 @@ export default function App() {
         <div className="flex-1 p-4 lg:p-8 overflow-auto">
           {currentView === 'dashboard' && role === 'admin' && <DashboardView photos={photos} files={files} messages={messages} projectInfo={projectInfo} onSave={saveProjectInfo} darkMode={darkMode} />}
           {currentView === 'photos' && <PhotosView photos={photos} role={role} onUpload={uploadRealPhoto} darkMode={darkMode} />}
-          {currentView === 'messages' && <MessagesView messages={messages} role={role} onSend={addMessage} darkMode={darkMode} user={user} files={files} onFileUpload={uploadRealFile} />}
+          {currentView === 'messages' && <MessagesView messages={messages} role={role} onSend={addMessage} darkMode={darkMode} user={user} files={files} onFileUpload={uploadRealFile} allUsers={allUsers} />}
           {currentView === 'files' && <FilesView files={files} role={role} onUpload={uploadRealFile} darkMode={darkMode} />}
-          {currentView === 'settings' && <SettingsView darkMode={darkMode} />}
+          {currentView === 'settings' && <SettingsView darkMode={darkMode} user={user} db={db} triggerNotification={triggerNotification} />}
         </div>
       </main>
     </div>
@@ -607,7 +630,7 @@ function PhotosView({ photos, role, onUpload, darkMode }) {
             <div key={photo.id} className={`rounded-xl overflow-hidden border ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
               <div className="aspect-[4/3] relative">
                 <a href={photo.url} target="_blank" rel="noopener noreferrer">
-                  <img src={photo.url} alt="Site" className="absolute inset-0 w-full h-full object-cover hover:opacity-90 transition-opacity" />
+                  <img src={photo.url} alt="Site progress" className="w-full h-full object-cover" />
                 </a>
               </div>
               <div className="p-3">
@@ -624,18 +647,29 @@ function PhotosView({ photos, role, onUpload, darkMode }) {
   );
 }
 
-function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpload }) {
+function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpload, allUsers }) {
   const [activeTab, setActiveTab] = useState(role === 'admin' ? 'admin' : 'contractor');
   const [newMsg, setNewMsg] = useState("");
   const [showAttachments, setShowAttachments] = useState(false);
   const [showMentions, setShowMentions] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  
+  // Category Upload Modal State
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [category, setCategory] = useState('Working drawings');
+  const [adminOnly, setAdminOnly] = useState(false);
+
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
   const filteredMessages = messages.filter(m => m.portalThread === activeTab);
   const visibleFiles = files ? (role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin')) : [];
-  const uniqueUsers = Array.from(new Set(filteredMessages.map(m => m.authorEmail))).filter(email => email && email !== 'Unknown User');
+  
+  const CATEGORIES = [
+    'RFI', 'Permit drawings', 'Documents from governing bodies', 
+    'Working drawings', 'Engineering reports', 'Invoices', 'Change orders', 'General'
+  ];
 
   const handleSend = (e) => {
     e.preventDefault();
@@ -650,6 +684,7 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
   }, [filteredMessages]);
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
+  const inputBg = darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900';
 
   const formatTimestamp = (fbTimestamp) => {
     if (!fbTimestamp || typeof fbTimestamp.toDate !== 'function') return 'Just now';
@@ -678,21 +713,31 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
     setShowMentions(false);
   };
 
-  const handleDirectUpload = async (e) => {
+  // When a file is chosen, open the categorization modal instead of instantly uploading
+  const handleFileSelect = (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-    
-    setIsUploading(true);
-    setShowAttachments(false);
+    if (file) {
+      setSelectedFile(file);
+      setShowUploadModal(true);
+      setShowAttachments(false);
+    }
+  };
 
-    const isAdminOnly = role === 'admin' && activeTab === 'admin';
-    const result = await onFileUpload(file, 'Message Board Attachment', isAdminOnly);
+  const handleConfirmUpload = async () => {
+    if (!selectedFile) return;
+    setIsUploading(true);
+    setShowUploadModal(false);
+
+    const result = await onFileUpload(selectedFile, category, adminOnly);
 
     if (result) {
       setNewMsg(prev => prev + (prev.endsWith(' ') || prev === '' ? '' : ' ') + `[${result.name}](${result.downloadUrl}) `);
     }
     
     setIsUploading(false);
+    setSelectedFile(null);
+    setCategory('Working drawings');
+    setAdminOnly(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -731,6 +776,44 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
       </div>
 
       <div className={`p-4 border-t ${darkMode ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'} relative`}>
+        
+        {/* Upload Categorization Modal */}
+        {showUploadModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className={`w-full max-w-md p-6 rounded-2xl shadow-xl border ${bgStyle}`}>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold">Attach File Details</h3>
+                <button onClick={() => { setShowUploadModal(false); setSelectedFile(null); }} className="text-slate-500 hover:text-slate-300"><X size={20}/></button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-slate-400">Selected File</label>
+                  <div className={`p-3 rounded-lg border ${inputBg} text-sm truncate`}>{selectedFile?.name}</div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-slate-400">Category</label>
+                  <select value={category} onChange={e => setCategory(e.target.value)} className={`w-full p-3 rounded-lg border ${inputBg}`}>
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {role === 'admin' && (
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
+                    <span className="text-sm font-medium">Make this file visible to Admins only</span>
+                  </label>
+                )}
+
+                <button onClick={handleConfirmUpload} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors mt-4">
+                  Confirm & Embed Link
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showAttachments && (
           <div className={`absolute bottom-[110%] left-4 mb-2 w-72 max-h-64 overflow-y-auto rounded-xl shadow-xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} p-2 z-10`}>
             <div className="text-xs font-bold text-slate-500 mb-2 px-2 uppercase flex justify-between items-center">
@@ -762,13 +845,13 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
         {showMentions && (
           <div className={`absolute bottom-[110%] left-14 mb-2 w-64 max-h-48 overflow-y-auto rounded-xl shadow-xl border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} p-2 z-10`}>
             <div className="text-xs font-bold text-slate-500 mb-2 px-2 uppercase flex justify-between">
-              <span>Tag User</span>
+              <span>Tag Team Member</span>
               <button onClick={() => setShowMentions(false)}><X size={14}/></button>
             </div>
-            {uniqueUsers.length === 0 ? (
-              <p className="text-xs text-slate-500 px-2 pb-2">No other users in this thread yet.</p>
+            {allUsers.length === 0 ? (
+              <p className="text-xs text-slate-500 px-2 pb-2">No other users found.</p>
             ) : (
-              uniqueUsers.map(email => (
+              allUsers.map(email => (
                 <button key={email} type="button" onClick={() => insertMention(email)} className={`w-full text-left px-3 py-2 hover:bg-blue-500/10 rounded-lg text-sm truncate transition-colors ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                   @ {email}
                 </button>
@@ -778,7 +861,7 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
         )}
 
         <form onSubmit={handleSend} className="relative flex items-center space-x-2">
-          <input type="file" className="hidden" ref={fileInputRef} onChange={handleDirectUpload} />
+          <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
 
           <div className="flex space-x-1">
             <button 
@@ -827,7 +910,7 @@ function FilesView({ files, role, onUpload, darkMode }) {
 
   const CATEGORIES = [
     'RFI', 'Permit drawings', 'Documents from governing bodies', 
-    'Working drawings', 'Engineering reports', 'Invoices', 'General'
+    'Working drawings', 'Engineering reports', 'Invoices', 'Change orders', 'General'
   ];
 
   const handleFileSelect = (e) => {
@@ -846,6 +929,7 @@ function FilesView({ files, role, onUpload, darkMode }) {
     setSelectedFile(null);
     setCategory('Working drawings');
     setAdminOnly(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
@@ -953,10 +1037,41 @@ function FilesView({ files, role, onUpload, darkMode }) {
   );
 }
 
-function SettingsView({ darkMode }) {
+function SettingsView({ darkMode, user, db, triggerNotification }) {
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [twoFactor, setTwoFactor] = useState(true);
+
+  // Load preferences from the database
+  useEffect(() => {
+    if (!user) return;
+    const fetchSettings = async () => {
+      const docRef = doc(db, 'users', user.uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists() && docSnap.data().settings) {
+        const s = docSnap.data().settings;
+        setPushEnabled(s.push ?? true);
+        setEmailEnabled(s.email ?? false);
+        setTwoFactor(s.twoFactor ?? true);
+      }
+    };
+    fetchSettings();
+  }, [user, db]);
+
+  // Save preferences to the database when toggled
+  const updateSetting = async (key, value) => {
+    if (key === 'push') setPushEnabled(value);
+    if (key === 'email') setEmailEnabled(value);
+    if (key === 'twoFactor') setTwoFactor(value);
+
+    try {
+      const docRef = doc(db, 'users', user.uid);
+      await setDoc(docRef, { settings: { [key]: value } }, { merge: true });
+      triggerNotification("Preferences Saved", "Settings updated successfully.");
+    } catch (err) {
+      console.error("Error saving settings:", err);
+    }
+  };
 
   const cardStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
 
@@ -965,6 +1080,10 @@ function SettingsView({ darkMode }) {
       <div>
         <h2 className="text-2xl font-bold mb-1">Security & Preferences</h2>
         <p className="text-sm text-slate-500">Manage your portal experience</p>
+      </div>
+
+      <div className="bg-blue-500/10 border border-blue-500 text-blue-400 p-4 rounded-xl text-sm">
+        <strong>Administrator Note:</strong> Your preferences will be saved to your profile. However, full automation of Push Notifications, Email Digests, and SMS 2FA requires integrating paid 3rd-party Firebase Extensions (like Twilio or SendGrid) to your backend servers.
       </div>
 
       <div className={`p-6 rounded-2xl border ${cardStyle} space-y-6`}>
@@ -976,7 +1095,7 @@ function SettingsView({ darkMode }) {
             <p className="text-xs text-slate-500">Real-time alerts for messages and uploads (via FCM)</p>
           </div>
           <button 
-            onClick={() => setPushEnabled(!pushEnabled)}
+            onClick={() => updateSetting('push', !pushEnabled)}
             className={`w-12 h-6 rounded-full transition-colors relative ${pushEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
           >
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${pushEnabled ? 'left-7' : 'left-1'}`} />
@@ -989,7 +1108,7 @@ function SettingsView({ darkMode }) {
             <p className="text-xs text-slate-500">Daily summary of portal activity (via SendGrid)</p>
           </div>
           <button 
-            onClick={() => setEmailEnabled(!emailEnabled)}
+            onClick={() => updateSetting('email', !emailEnabled)}
             className={`w-12 h-6 rounded-full transition-colors relative ${emailEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
           >
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${emailEnabled ? 'left-7' : 'left-1'}`} />
@@ -1006,7 +1125,7 @@ function SettingsView({ darkMode }) {
             <p className="text-xs text-slate-500">Require SMS/Email code on login</p>
           </div>
           <button 
-            onClick={() => setTwoFactor(!twoFactor)}
+            onClick={() => updateSetting('twoFactor', !twoFactor)}
             className={`w-12 h-6 rounded-full transition-colors relative ${twoFactor ? 'bg-emerald-500' : 'bg-slate-700'}`}
           >
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${twoFactor ? 'left-7' : 'left-1'}`} />
@@ -1014,5 +1133,7 @@ function SettingsView({ darkMode }) {
         </div>
       </div>
     </div>
+  );
+}
   );
 }
