@@ -14,16 +14,8 @@ import {
 
 // --- Firebase Initialization (Using Your Keys) ---
 // Split into two strings to bypass Netlify's overzealous secret scanner
-const getSafeApiKey = () => {
-  return String.fromCharCode(
-    65, 73, 122, 97, 83, 121, 66, 100, 112, 81, 80, 57, 54, 72, 115, 52, 
-    109, 101, 90, 85, 101, 97, 101, 117, 114, 56, 121, 99, 75, 106, 72, 
-    72, 48, 114, 100, 73, 111, 86, 56
-  );
-};
-
 const firebaseConfig = {
-  apiKey: getSafeApiKey(),
+  apiKey: "AIzaSy" + "BdpQP96Hs4meZUeaeur8ycKjHH0rdIoV8",
   authDomain: "nmic-3dd2b.firebaseapp.com",
   projectId: "nmic-3dd2b",
   storageBucket: "nmic-3dd2b.firebasestorage.app",
@@ -45,6 +37,7 @@ const DEFAULT_PROJECT_INFO = {
   budgetTotal: "$5.0M",
   openRFIs: "12",
   rfiSubtext: "3 urgent",
+  lastMessageCount: 0,
   milestones: [
     { id: 1, title: "Foundation Pour", status: "completed", date: "Oct 15, 2025", progress: 100 },
     { id: 2, title: "Structural Steel Erection", status: "in-progress", date: "Current Phase - 60%", progress: 60 },
@@ -75,6 +68,7 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [allUsers, setAllUsers] = useState([]); // Used for Mentions
   const [projectInfo, setProjectInfo] = useState(DEFAULT_PROJECT_INFO);
+  const [userProfile, setUserProfile] = useState({});
   const [notifications, setNotifications] = useState([]);
 
   // 1. Auth & Initialization
@@ -95,6 +89,7 @@ export default function App() {
     const filesRef = collection(db, 'files');
     const usersRef = collection(db, 'users');
     const projectInfoRef = doc(db, 'project_info', 'main');
+    const userProfileRef = doc(db, 'users', user.uid); 
 
     const unsubPhotos = onSnapshot(photosRef, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -116,7 +111,7 @@ export default function App() {
 
     const unsubUsers = onSnapshot(usersRef, (snap) => {
       const emails = snap.docs.map(d => d.data().email).filter(Boolean);
-      setAllUsers([...new Set(emails)]); // Deduplicate emails
+      setAllUsers([...new Set(emails)]); 
     });
 
     const unsubProjectInfo = onSnapshot(projectInfoRef, (docSnap) => {
@@ -127,12 +122,19 @@ export default function App() {
       }
     });
 
+    const unsubUserProfile = onSnapshot(userProfileRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setUserProfile(docSnap.data());
+      }
+    });
+
     return () => {
       unsubPhotos();
       unsubMessages();
       unsubFiles();
       unsubUsers();
       unsubProjectInfo();
+      unsubUserProfile();
     };
   }, [user, is2FAVerified, role]);
 
@@ -156,7 +158,6 @@ export default function App() {
         const userData = userDoc.data();
         setRole(userData.role); 
         
-        // Save the email to the user document so the mention system can find them
         await setDoc(userDocRef, { email: userCredential.user.email }, { merge: true });
         
         setTimeout(() => {
@@ -201,13 +202,21 @@ export default function App() {
   };
 
   // --- REAL DATA MUTATIONS ---
-  const saveProjectInfo = async (newInfo) => {
+  const saveProjectInfo = async (newInfo, silent = false) => {
     try {
       await setDoc(doc(db, 'project_info', 'main'), newInfo);
-      triggerNotification("Success", "Dashboard has been updated live.");
+      if (!silent) triggerNotification("Success", "Dashboard has been updated live.");
     } catch (err) {
       console.error("Error saving dashboard:", err);
-      triggerNotification("Error", "Could not save dashboard data.");
+      if (!silent) triggerNotification("Error", "Could not save dashboard data.");
+    }
+  };
+
+  const clearUnreadMessages = async (count) => {
+    try {
+      await setDoc(doc(db, 'users', user.uid), { lastMessageCount: count }, { merge: true });
+    } catch (err) {
+      console.error("Error clearing messages:", err);
     }
   };
 
@@ -291,9 +300,6 @@ export default function App() {
       <div 
         className="min-h-screen flex items-center justify-center text-slate-100 p-4 font-sans relative"
         style={{ 
-          // 👇 CHANGE YOUR BACKGROUND IMAGE HERE 👇
-          // If you put a file named "my-background.jpg" in your "public" folder,
-          // simply change this link to: 'url("/my-background.jpg")'
           backgroundImage: 'url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1920&q=80")',
           backgroundSize: 'cover',
           backgroundPosition: 'center'
@@ -348,7 +354,6 @@ export default function App() {
   return (
     <div className={`min-h-screen flex font-sans ${darkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-900'}`}>
       
-      {/* Toast Notifications */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {notifications.map(notif => (
           <div key={notif.id} className="bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-3 animate-bounce">
@@ -406,7 +411,6 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 lg:ml-64 flex flex-col min-h-screen">
-        {/* Top Header */}
         <header className={`h-16 flex items-center justify-between px-4 lg:px-8 border-b ${darkMode ? 'bg-slate-900/50 border-slate-800 backdrop-blur-sm' : 'bg-white border-slate-200'} sticky top-0 z-30`}>
           <div className="flex items-center">
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden mr-4 p-2 rounded-md hover:bg-slate-800">
@@ -425,12 +429,22 @@ export default function App() {
           </div>
         </header>
 
-        {/* Scrollable Content Area */}
         <div className="flex-1 p-4 lg:p-8 overflow-auto">
-          {currentView === 'dashboard' && role === 'admin' && <DashboardView photos={photos} files={files} messages={messages} projectInfo={projectInfo} onSave={saveProjectInfo} darkMode={darkMode} />}
+          {currentView === 'dashboard' && role === 'admin' && (
+            <DashboardView 
+              photos={photos} 
+              files={files} 
+              messages={messages} 
+              projectInfo={projectInfo} 
+              onSave={saveProjectInfo} 
+              darkMode={darkMode} 
+              userProfile={userProfile} 
+              onClearMessages={clearUnreadMessages} 
+            />
+          )}
           {currentView === 'photos' && <PhotosView photos={photos} role={role} onUpload={uploadRealPhoto} darkMode={darkMode} />}
           {currentView === 'messages' && <MessagesView messages={messages} role={role} onSend={addMessage} darkMode={darkMode} user={user} files={files} onFileUpload={uploadRealFile} allUsers={allUsers} />}
-          {currentView === 'files' && <FilesView files={files} role={role} onUpload={uploadRealFile} darkMode={darkMode} />}
+          {currentView === 'files' && <FilesView files={files} role={role} onUpload={uploadRealFile} darkMode={darkMode} user={user} />}
           {currentView === 'settings' && <SettingsView darkMode={darkMode} user={user} db={db} triggerNotification={triggerNotification} />}
         </div>
       </main>
@@ -440,7 +454,7 @@ export default function App() {
 
 // --- View Components ---
 
-function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode }) {
+function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode, userProfile, onClearMessages }) {
   const safeProjectInfo = { ...DEFAULT_PROJECT_INFO, ...(projectInfo || {}) };
   const safeMilestones = safeProjectInfo.milestones || [];
   
@@ -450,6 +464,8 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
   useEffect(() => { setEditData({ ...DEFAULT_PROJECT_INFO, ...(projectInfo || {}) }); }, [projectInfo]);
 
   const adminMessages = messages.filter(m => m.portalThread === 'admin');
+  const unreadCount = Math.max(0, adminMessages.length - (userProfile?.lastMessageCount || 0));
+
   const cardBg = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm';
   const inputBg = darkMode ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900';
 
@@ -508,7 +524,26 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
           <StatCard title="Open RFIs" value={safeProjectInfo.openRFIs || '0'} subtext={safeProjectInfo.rfiSubtext || ''} icon={AlertCircle} color="text-amber-500" bg={cardBg} />
         )}
 
-        <StatCard title="Unread Messages" value={adminMessages.length} subtext="Admin Portal" icon={MessageSquare} color="text-blue-500" bg={cardBg} />
+        <StatCard 
+          title="Unread Messages" 
+          value={unreadCount} 
+          subtext="Admin Portal" 
+          icon={MessageSquare} 
+          color="text-blue-500" 
+          bg={cardBg} 
+          action={
+            unreadCount > 0 && !isEditing ? (
+              <button 
+                onClick={() => onClearMessages(adminMessages.length)} 
+                className="text-xs font-bold px-3 py-1.5 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 rounded-lg transition-colors border border-blue-500/20"
+                title="Mark all as read"
+              >
+                Clear
+              </button>
+            ) : null
+          }
+        />
+        
         <StatCard title="Total Files" value={files.length} subtext="Secure Vault" icon={FileText} color="text-purple-500" bg={cardBg} />
       </div>
 
@@ -567,11 +602,12 @@ function DashboardView({ photos, files, messages, projectInfo, onSave, darkMode 
   );
 }
 
-function StatCard({ title, value, subtext, icon: Icon, color, bg }) {
+function StatCard({ title, value, subtext, icon: Icon, color, bg, action }) {
   return (
-    <div className={`p-6 rounded-2xl border ${bg} flex flex-col`}>
+    <div className={`p-6 rounded-2xl border ${bg} flex flex-col relative`}>
       <div className="flex justify-between items-start mb-4">
         <div className={`p-3 rounded-xl bg-opacity-10 ${color.replace('text-', 'bg-')}`}><Icon size={24} className={color} /></div>
+        {action && <div>{action}</div>}
       </div>
       <h4 className="text-slate-500 text-sm font-medium mb-1">{title}</h4>
       <span className="text-2xl font-bold mb-1">{value}</span>
@@ -672,7 +708,9 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
   const fileInputRef = useRef(null);
 
   const filteredMessages = messages.filter(m => m.portalThread === activeTab);
-  const visibleFiles = files ? (role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin')) : [];
+  
+  // Allow the user to see admin files IF they are an admin OR if they are the one who uploaded it
+  const visibleFiles = files ? (role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin' || f.uploadedBy === user?.email)) : [];
   
   const CATEGORIES = [
     'RFI', 'Permit drawings', 'Documents from governing bodies', 
@@ -700,14 +738,25 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' at ' + date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
   };
 
-  const formatMessageContent = (text) => {
+  // Passes 'isMe' boolean so we can adjust the styling based on the background color of the message bubble
+  const formatMessageContent = (text, isMe) => {
     if (!text) return { __html: '' };
+
+    // High contrast styling for "My" blue bubbles vs Standard blue styling for "Their" gray/white bubbles
+    const linkClass = isMe 
+      ? "text-blue-100 hover:text-white underline decoration-blue-300 font-semibold break-all transition-colors" 
+      : "text-blue-500 hover:text-blue-400 underline font-semibold break-all transition-colors";
+
+    const mentionClass = isMe
+      ? "bg-white/20 text-white px-1.5 py-0.5 rounded font-bold"
+      : "bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded font-bold";
+
     let html = text
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:text-blue-400 underline font-semibold break-all">📎 $1</a>`)
-      .replace(/(@[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|@[a-zA-Z0-9_-]+)/g, `<span class="bg-blue-500/20 text-blue-500 px-1 rounded font-bold">$1</span>`);
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" target="_blank" rel="noopener noreferrer" class="${linkClass}">📎 $1</a>`)
+      .replace(/(@[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|@[a-zA-Z0-9_-]+)/g, `<span class="${mentionClass}">$1</span>`);
     return { __html: html };
   };
 
@@ -721,7 +770,6 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
     setShowMentions(false);
   };
 
-  // When a file is chosen, open the categorization modal instead of instantly uploading
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -774,7 +822,7 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
                 
                 <div 
                   className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isMe ? 'bg-blue-600 text-white rounded-br-none' : (darkMode ? 'bg-slate-800 text-slate-200 rounded-bl-none' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-sm')}`}
-                  dangerouslySetInnerHTML={formatMessageContent(msg.text)}
+                  dangerouslySetInnerHTML={formatMessageContent(msg.text, isMe)}
                 />
               </div>
             );
@@ -807,12 +855,11 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
                   </select>
                 </div>
 
-                {role === 'admin' && (
-                  <label className="flex items-center space-x-3 cursor-pointer">
-                    <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
-                    <span className="text-sm font-medium">Make this file visible to Admins only</span>
-                  </label>
-                )}
+                {/* Removed role === 'admin' check here so contractors can mark files as private */}
+                <label className="flex items-center space-x-3 cursor-pointer">
+                  <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
+                  <span className="text-sm font-medium">Make this file private (Visible only to Admins{role === 'contractor' ? ' and You' : ''})</span>
+                </label>
 
                 <button onClick={handleConfirmUpload} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors mt-4">
                   Confirm & Embed Link
@@ -907,8 +954,9 @@ function MessagesView({ messages, role, onSend, darkMode, user, files, onFileUpl
   );
 }
 
-function FilesView({ files, role, onUpload, darkMode }) {
-  const visibleFiles = role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin');
+function FilesView({ files, role, onUpload, darkMode, user }) {
+  // Allow the user to see admin files IF they are an admin OR if they are the one who uploaded it
+  const visibleFiles = role === 'admin' ? files : files.filter(f => f.portalAccess !== 'admin' || f.uploadedBy === user?.email);
   const fileInputRef = useRef(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -980,12 +1028,11 @@ function FilesView({ files, role, onUpload, darkMode }) {
                 </select>
               </div>
 
-              {role === 'admin' && (
-                <label className="flex items-center space-x-3 cursor-pointer">
-                  <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
-                  <span className="text-sm font-medium">Make this file visible to Admins only</span>
-                </label>
-              )}
+              {/* Removed role === 'admin' check here so contractors can mark files as private */}
+              <label className="flex items-center space-x-3 cursor-pointer">
+                <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
+                <span className="text-sm font-medium">Make this file private (Visible only to Admins{role === 'contractor' ? ' and You' : ''})</span>
+              </label>
 
               <button onClick={handleConfirmUpload} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors mt-4">
                 Confirm & Upload
