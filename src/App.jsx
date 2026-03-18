@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, addDoc, doc, setDoc, getDoc, serverTimestamp, getDocs } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   LayoutDashboard, Image as ImageIcon, MessageSquare, FolderKanban, 
@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 
 // --- Firebase Initialization (Using Your Keys) ---
-// Split into two strings to bypass Netlify's overzealous secret scanner
 const firebaseConfig = {
   apiKey: "AIzaSy" + "BdpQP96Hs4meZUeaeur8ycKjHH0rdIoV8",
   authDomain: "nmic-3dd2b.firebaseapp.com",
@@ -47,7 +46,7 @@ const DEFAULT_PROJECT_INFO = {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null); // 'admin' or 'contractor'
+  const [role, setRole] = useState(null); 
   const [is2FAVerified, setIs2FAVerified] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -66,7 +65,7 @@ export default function App() {
   const [photos, setPhotos] = useState([]);
   const [messages, setMessages] = useState([]);
   const [files, setFiles] = useState([]);
-  const [allUsers, setAllUsers] = useState([]); // Used for Mentions
+  const [allUsers, setAllUsers] = useState([]); 
   const [projectInfo, setProjectInfo] = useState(DEFAULT_PROJECT_INFO);
   const [userProfile, setUserProfile] = useState({});
   const [notifications, setNotifications] = useState([]);
@@ -80,7 +79,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Data Fetching (Guarded by user)
+  // 2. Data Fetching
   useEffect(() => {
     if (!user || !is2FAVerified || !role) return;
 
@@ -142,6 +141,36 @@ export default function App() {
     const newNotif = { id: Date.now(), title, message };
     setNotifications(prev => [newNotif, ...prev]);
     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== newNotif.id)), 4000);
+  };
+
+  // --- NEW: Email Alert System ---
+  const sendEmailAlert = async (subject, htmlBody) => {
+    try {
+      // Find all users who have email alerts turned ON
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const emailsToAlert = [];
+      
+      usersSnap.forEach(doc => {
+        const data = doc.data();
+        // Check if they enabled email settings and are NOT the person doing the action
+        if (data.settings?.email === true && data.email !== user.email) {
+          emailsToAlert.push(data.email);
+        }
+      });
+
+      // Drop an email request into the 'mail' collection for each user
+      for (const recipient of emailsToAlert) {
+        await addDoc(collection(db, 'mail'), {
+          to: recipient,
+          message: {
+            subject: subject,
+            html: htmlBody
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Failed to queue email:", err);
+    }
   };
 
   // --- Handlers ---
@@ -233,6 +262,16 @@ export default function App() {
         createdAt: serverTimestamp()
       });
       triggerNotification("Message Sent", `Posted to ${portalThread} board.`);
+      
+      // Trigger Email Notification
+      sendEmailAlert(
+        `NMICTrack: New Message in ${portalThread} Thread`, 
+        `<h2>New Message Alert</h2>
+         <p><strong>${user.email || role}</strong> posted a new message in the <strong>${portalThread}</strong> thread.</p>
+         <p style="padding: 15px; border-left: 4px solid #2563eb; background: #f8fafc; color: #334155;">"${text}"</p>
+         <p><a href="https://your-website.com">Log in to NMICTrack to reply.</a></p>`
+      );
+
     } catch (err) {
       console.error("Error sending message:", err);
     }
@@ -282,6 +321,19 @@ export default function App() {
       });
       triggerNotification("File Uploaded", `${file.name} secured.`);
       
+      // Trigger Email Notification
+      sendEmailAlert(
+        `NMICTrack: New Document Uploaded (${category})`, 
+        `<h2>New File Upload Alert</h2>
+         <p><strong>${user.email || role}</strong> just uploaded a new document to the Secure Vault.</p>
+         <ul>
+           <li><strong>File Name:</strong> ${file.name}</li>
+           <li><strong>Category:</strong> ${category}</li>
+           <li><strong>Privacy:</strong> ${adminOnly ? 'Admins Only' : 'Visible to all'}</li>
+         </ul>
+         <p><a href="https://your-website.com">Log in to NMICTrack to download this file.</a></p>`
+      );
+      
       return { name: file.name, downloadUrl };
     } catch (err) {
       console.error("Error uploading file:", err);
@@ -301,9 +353,6 @@ export default function App() {
       <div 
         className="min-h-screen flex items-center justify-center text-slate-100 p-4 font-sans relative"
         style={{ 
-          // 👇 CHANGE YOUR BACKGROUND IMAGE HERE 👇
-          // If you put a file named "my-background.jpg" in your "public" folder,
-          // simply change this link to: 'url("/my-background.jpg")'
           backgroundImage: 'url("https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1920&q=80")',
           backgroundSize: 'cover',
           backgroundPosition: 'center'
@@ -1084,6 +1133,10 @@ function FilesView({ files, role, onUpload, darkMode, user }) {
   const [category, setCategory] = useState('Working drawings');
   const [adminOnly, setAdminOnly] = useState(false);
 
+  // Sorting State
+  const [sortField, setSortField] = useState('date');
+  const [sortDirection, setSortDirection] = useState('desc');
+
   const CATEGORIES = [
     'RFI', 'Permit drawings', 'Documents from governing bodies', 
     'Working drawings', 'Engineering reports', 'Invoices', 'Change orders', 'General'
@@ -1106,6 +1159,53 @@ function FilesView({ files, role, onUpload, darkMode, user }) {
     setCategory('Working drawings');
     setAdminOnly(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // --- Sorting Logic ---
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc'); // Default to ascending when clicking a new column
+    }
+  };
+
+  const sortedFiles = [...visibleFiles].sort((a, b) => {
+    let aValue, bValue;
+    
+    switch (sortField) {
+      case 'name':
+        aValue = a.name.toLowerCase();
+        bValue = b.name.toLowerCase();
+        break;
+      case 'type':
+        aValue = (a.type || '').toLowerCase();
+        bValue = (b.type || '').toLowerCase();
+        break;
+      case 'category':
+        aValue = (a.category || 'General').toLowerCase();
+        bValue = (b.category || 'General').toLowerCase();
+        break;
+      case 'uploadedBy':
+        aValue = (a.uploadedBy || '').toLowerCase();
+        bValue = (b.uploadedBy || '').toLowerCase();
+        break;
+      case 'date':
+      default:
+        aValue = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        bValue = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        break;
+    }
+
+    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <span className="text-slate-500 opacity-40 ml-1">↕</span>;
+    return <span className="ml-1 text-blue-500 font-bold">{sortDirection === 'asc' ? '↑' : '↓'}</span>;
   };
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
@@ -1148,7 +1248,6 @@ function FilesView({ files, role, onUpload, darkMode, user }) {
                 </select>
               </div>
 
-              {/* Removed role === 'admin' check here so contractors can mark files as private */}
               <label className="flex items-center space-x-3 cursor-pointer">
                 <input type="checkbox" checked={adminOnly} onChange={e => setAdminOnly(e.target.checked)} className="w-5 h-5 rounded border-slate-700 text-blue-600 focus:ring-blue-500 bg-slate-800" />
                 <span className="text-sm font-medium">Make this file private (Visible only to Admins{role === 'contractor' ? ' and You' : ''})</span>
@@ -1167,19 +1266,30 @@ function FilesView({ files, role, onUpload, darkMode, user }) {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className={`${headerStyle} border-b ${darkMode ? 'border-slate-800' : 'border-slate-200'} text-xs uppercase tracking-wider`}>
-                <th className="p-4 font-semibold">File Name</th>
-                <th className="p-4 font-semibold">Category</th>
+                <th onClick={() => handleSort('name')} className="p-4 font-semibold cursor-pointer hover:bg-slate-500/10 transition-colors select-none">
+                  File Name <SortIcon field="name" />
+                </th>
+                <th onClick={() => handleSort('type')} className="p-4 font-semibold cursor-pointer hover:bg-slate-500/10 transition-colors select-none">
+                  Type <SortIcon field="type" />
+                </th>
+                <th onClick={() => handleSort('category')} className="p-4 font-semibold cursor-pointer hover:bg-slate-500/10 transition-colors select-none">
+                  Category <SortIcon field="category" />
+                </th>
                 <th className="p-4 font-semibold">Size</th>
-                <th className="p-4 font-semibold">Uploaded By</th>
-                <th className="p-4 font-semibold">Date</th>
+                <th onClick={() => handleSort('uploadedBy')} className="p-4 font-semibold cursor-pointer hover:bg-slate-500/10 transition-colors select-none">
+                  Uploaded By <SortIcon field="uploadedBy" />
+                </th>
+                <th onClick={() => handleSort('date')} className="p-4 font-semibold cursor-pointer hover:bg-slate-500/10 transition-colors select-none">
+                  Date <SortIcon field="date" />
+                </th>
                 <th className="p-4 font-semibold text-right">Download</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {visibleFiles.length === 0 ? (
-                <tr><td colSpan="6" className="p-8 text-center text-slate-500">No files uploaded yet.</td></tr>
+              {sortedFiles.length === 0 ? (
+                <tr><td colSpan="7" className="p-8 text-center text-slate-500">No files uploaded yet.</td></tr>
               ) : (
-                visibleFiles.map(file => (
+                sortedFiles.map(file => (
                   <tr key={file.id} className={`transition-colors ${darkMode ? 'hover:bg-slate-800/50 divide-slate-800' : 'hover:bg-slate-50 divide-slate-200 border-b'}`}>
                     <td className="p-4">
                       <div className="flex items-center space-x-3">
@@ -1190,6 +1300,7 @@ function FilesView({ files, role, onUpload, darkMode, user }) {
                         </div>
                       </div>
                     </td>
+                    <td className="p-4 text-sm font-bold text-slate-400">{file.type}</td>
                     <td className="p-4 text-sm"><span className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs whitespace-nowrap">{file.category || 'General'}</span></td>
                     <td className="p-4 text-sm text-slate-500">{file.size}</td>
                     <td className="p-4 text-sm truncate max-w-[150px]" title={file.uploadedBy}>{file.uploadedBy}</td>
@@ -1257,30 +1368,13 @@ function SettingsView({ darkMode, user, db, triggerNotification }) {
         <p className="text-sm text-slate-500">Manage your portal experience</p>
       </div>
 
-      <div className="bg-blue-500/10 border border-blue-500 text-blue-400 p-4 rounded-xl text-sm">
-        <strong>Administrator Note:</strong> Your preferences will be saved to your profile. However, full automation of Push Notifications, Email Digests, and SMS 2FA requires integrating paid 3rd-party Firebase Extensions (like Twilio or SendGrid) to your backend servers.
-      </div>
-
       <div className={`p-6 rounded-2xl border ${cardStyle} space-y-6`}>
         <h3 className="text-lg font-semibold border-b border-inherit pb-4">Notifications</h3>
         
         <div className="flex items-center justify-between">
           <div>
-            <p className="font-medium">Push Notifications</p>
-            <p className="text-xs text-slate-500">Real-time alerts for messages and uploads (via FCM)</p>
-          </div>
-          <button 
-            onClick={() => updateSetting('push', !pushEnabled)}
-            className={`w-12 h-6 rounded-full transition-colors relative ${pushEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
-          >
-            <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${pushEnabled ? 'left-7' : 'left-1'}`} />
-          </button>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">Email Digests</p>
-            <p className="text-xs text-slate-500">Daily summary of portal activity (via SendGrid)</p>
+            <p className="font-medium">Instant Email Alerts</p>
+            <p className="text-xs text-slate-500">Get an email right away when files or messages are posted.</p>
           </div>
           <button 
             onClick={() => updateSetting('email', !emailEnabled)}
@@ -1289,21 +1383,29 @@ function SettingsView({ darkMode, user, db, triggerNotification }) {
             <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${emailEnabled ? 'left-7' : 'left-1'}`} />
           </button>
         </div>
+
+        <div className="flex items-center justify-between opacity-50 cursor-not-allowed" title="Requires Backend Setup">
+          <div>
+            <p className="font-medium">Push Notifications</p>
+            <p className="text-xs text-slate-500">Real-time alerts for messages and uploads (Pending Setup)</p>
+          </div>
+          <button disabled className={`w-12 h-6 rounded-full transition-colors relative bg-slate-700`}>
+            <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-all`} />
+          </button>
+        </div>
+
       </div>
 
       <div className={`p-6 rounded-2xl border ${cardStyle} space-y-6`}>
         <h3 className="text-lg font-semibold border-b border-inherit pb-4 text-red-400">Security</h3>
         
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between opacity-50 cursor-not-allowed">
           <div>
             <p className="font-medium">Two-Factor Authentication (2FA)</p>
-            <p className="text-xs text-slate-500">Require SMS/Email code on login</p>
+            <p className="text-xs text-slate-500">Require SMS/Email code on login (Pending Setup)</p>
           </div>
-          <button 
-            onClick={() => updateSetting('twoFactor', !twoFactor)}
-            className={`w-12 h-6 rounded-full transition-colors relative ${twoFactor ? 'bg-emerald-500' : 'bg-slate-700'}`}
-          >
-            <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${twoFactor ? 'left-7' : 'left-1'}`} />
+          <button disabled className={`w-12 h-6 rounded-full transition-colors relative bg-slate-700`}>
+            <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-all`} />
           </button>
         </div>
       </div>
