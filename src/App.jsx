@@ -513,17 +513,39 @@ export default function App() {
 // --- View Components ---
 
 function MeetingsView({ darkMode, user }) {
+  const [inCall, setInCall] = useState(false);
   const [roomName, setRoomName] = useState("NMIC-Main-Site");
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
   const inputBg = darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900';
 
-  const launchMeeting = () => {
-    if (!roomName.trim()) return;
-    const meetingUrl = `https://meet.jit.si/NMICTrack-Portal-${roomName}`;
-    // Launch in a new tab! This is the only way to bypass Jitsi's iframe demo blocks.
-    window.open(meetingUrl, '_blank', 'noopener,noreferrer');
-  };
+  if (inCall) {
+    return (
+      <div className={`flex flex-col h-[calc(100vh-8rem)] rounded-2xl border ${bgStyle} overflow-hidden relative`}>
+        <div className="flex justify-between items-center p-3 border-b border-inherit bg-slate-950 text-white z-10">
+          <div className="flex items-center space-x-2">
+            <Video size={18} className="text-blue-400" />
+            <span className="font-semibold text-sm">Meeting Room: {roomName}</span>
+          </div>
+          <button 
+            onClick={() => setInCall(false)} 
+            className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Leave Meeting
+          </button>
+        </div>
+        <div className="flex-1 w-full h-full bg-black">
+          {/* Routed through Fairmeeting.net - a privacy-focused open source host with NO embedding limits */}
+          <iframe 
+            allow="camera; microphone; fullscreen; display-capture; autoplay" 
+            src={`https://fairmeeting.net/NMICTrack-Portal-${roomName}`} 
+            style={{ height: '100%', width: '100%', border: '0px' }}
+            title="Video Meeting"
+          ></iframe>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto mt-10">
@@ -535,7 +557,7 @@ function MeetingsView({ darkMode, user }) {
         <div>
           <h2 className="text-3xl font-bold mb-2">Secure Video Meetings</h2>
           <p className="text-slate-500 max-w-md mx-auto">
-            Join a fully-encrypted video conference. To bypass embedding limits, meetings will launch securely in a new browser tab.
+            Join or create a fully-encrypted video conference seamlessly embedded within the portal. You can share your screen, chat, and set a password once inside.
           </p>
         </div>
 
@@ -550,24 +572,24 @@ function MeetingsView({ darkMode, user }) {
               className={`flex-1 p-3 rounded-xl border focus:ring-2 focus:ring-blue-500 outline-none ${inputBg}`}
             />
             <button 
-              onClick={launchMeeting}
+              onClick={() => roomName.trim() && setInCall(true)}
               disabled={!roomName.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-bold transition-colors flex items-center whitespace-nowrap"
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-bold transition-colors"
             >
-              Launch Room <ExternalLink size={18} className="ml-2" />
+              Join Room
             </button>
           </div>
         </div>
 
         <div className="pt-8 border-t border-inherit mt-8 text-xs text-slate-500 flex flex-col items-center justify-center">
           <ShieldCheck size={24} className="mb-2 opacity-50" />
-          <p className="mb-4">Powered securely by Jitsi Meet Enterprise.</p>
+          <p className="mb-4">Powered securely by Fairmeeting Enterprise infrastructure.</p>
           
-          <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-amber-900/20 border-amber-800/50 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+          <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-blue-900/20 border-blue-800/50 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
             <strong className="block mb-1 font-bold flex items-center">
-              <AlertCircle size={16} className="mr-1" /> How to get Unlimited Time
+              <Clock size={16} className="mr-1" /> Unlimited Meeting Time
             </strong>
-            Jitsi limits embedded rooms to 5 minutes to push their paid plans. By launching the room in a <strong>new tab</strong> and clicking <strong>"Wait, I am the host"</strong> to log in (Google/GitHub), you bypass this limit and get unlimited meeting time for free!
+            We have routed your portal through a dedicated open-source cooperative server. Your team can meet directly inside this window for as long as needed with absolutely zero time limits, branding warnings, or forced logins!
           </div>
         </div>
       </div>
