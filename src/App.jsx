@@ -515,9 +515,46 @@ export default function App() {
 function MeetingsView({ darkMode, user }) {
   const [inCall, setInCall] = useState(false);
   const [roomName, setRoomName] = useState("NMIC-Main-Site");
+  const jitsiContainerRef = useRef(null);
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
   const inputBg = darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900';
+
+  useEffect(() => {
+    let api = null;
+    
+    // Load the official Jitsi External API to bypass iframe security blocks
+    if (inCall && jitsiContainerRef.current) {
+      const loadJitsiScript = () => {
+        if (window.JitsiMeetExternalAPI) {
+          api = new window.JitsiMeetExternalAPI('meet.jit.si', {
+            roomName: `NMICTrack-Portal-${roomName}`,
+            parentNode: jitsiContainerRef.current,
+            width: '100%',
+            height: '100%',
+            userInfo: {
+              displayName: user?.email || 'Portal User'
+            }
+          });
+        }
+      };
+
+      if (!window.JitsiMeetExternalAPI) {
+        const script = document.createElement("script");
+        script.src = "https://meet.jit.si/external_api.js";
+        script.async = true;
+        script.onload = loadJitsiScript;
+        document.body.appendChild(script);
+      } else {
+        loadJitsiScript();
+      }
+    }
+
+    return () => {
+      // Clean up the meeting when the user leaves the tab
+      if (api) api.dispose();
+    };
+  }, [inCall, roomName, user]);
 
   if (inCall) {
     return (
@@ -537,14 +574,9 @@ function MeetingsView({ darkMode, user }) {
             Leave Meeting
           </button>
         </div>
-        <div className="flex-1 w-full h-full bg-black">
-          <iframe 
-            allow="camera; microphone; fullscreen; display-capture; autoplay" 
-            src={`https://meet.jit.si/NMICTrack-Portal-${roomName}`} 
-            style={{ height: '100%', width: '100%', border: '0px' }}
-            title="Video Meeting"
-          ></iframe>
-        </div>
+        
+        {/* The Jitsi script will securely inject the video player into this div */}
+        <div ref={jitsiContainerRef} className="flex-1 w-full h-full bg-black" />
       </div>
     );
   }
