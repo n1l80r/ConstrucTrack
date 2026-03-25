@@ -535,10 +535,13 @@ function MeetingsView({ darkMode, user }) {
           </button>
         </div>
         <div className="flex-1 w-full h-full bg-black">
-          {/* Routed through Framatalk - a stable open-source host with NO embedding limits */}
+          {/* 1. Using Framatalk for zero embedding limits
+            2. toLowerCase() prevents mobile auto-capitalization from creating separate rooms
+            3. disableDeepLinking=true stops mobile phones from bouncing users to the app store
+          */}
           <iframe 
             allow="camera; microphone; fullscreen; display-capture; autoplay" 
-            src={`https://framatalk.org/NMICTrack-Portal-${roomName}`} 
+            src={`https://framatalk.org/NMICTrack-Portal-${roomName.toLowerCase()}#config.disableDeepLinking=true&config.prejoinPageEnabled=false`} 
             style={{ height: '100%', width: '100%', border: '0px' }}
             title="Video Meeting"
           ></iframe>
