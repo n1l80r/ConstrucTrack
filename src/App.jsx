@@ -519,29 +519,39 @@ function MeetingsView({ darkMode, user }) {
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
   const inputBg = darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900';
 
+  const safeRoomName = roomName.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const meetingUrl = `https://framatalk.org/NMICTrack-Portal-${safeRoomName}`;
+  // Bypass mobile security blocks by passing the email automatically and disabling local storage
+  const iframeUrl = `${meetingUrl}#config.disableDeepLinking=true&config.prejoinPageEnabled=false&config.disableLocalStorage=true&userInfo.displayName=${encodeURIComponent(user?.email || 'Portal User')}`;
+
   if (inCall) {
     return (
       <div className={`flex flex-col h-[calc(100vh-8rem)] rounded-2xl border ${bgStyle} overflow-hidden relative`}>
-        <div className="flex justify-between items-center p-3 border-b border-inherit bg-slate-950 text-white z-10">
-          <div className="flex items-center space-x-2">
-            <Video size={18} className="text-blue-400" />
-            <span className="font-semibold text-sm">Meeting Room: {roomName}</span>
+        <div className="flex flex-col md:flex-row justify-between items-center p-3 border-b border-inherit bg-slate-950 text-white z-10 gap-2">
+          <div className="flex items-center space-x-2 w-full md:w-auto">
+            <Video size={18} className="text-blue-400 flex-shrink-0" />
+            <span className="font-semibold text-sm truncate">Room: {roomName}</span>
           </div>
-          <button 
-            onClick={() => setInCall(false)} 
-            className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition-colors"
-          >
-            Leave Meeting
-          </button>
+          <div className="flex items-center space-x-2 w-full md:w-auto">
+            <button 
+              onClick={() => window.open(meetingUrl, '_blank')}
+              className="flex-1 md:flex-none text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center justify-center whitespace-nowrap"
+              title="Pop out to fix mobile camera/audio issues"
+            >
+              <ExternalLink size={14} className="mr-1" /> Open Full Screen
+            </button>
+            <button 
+              onClick={() => setInCall(false)} 
+              className="flex-1 md:flex-none text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+            >
+              Leave
+            </button>
+          </div>
         </div>
         <div className="flex-1 w-full h-full bg-black">
-          {/* 1. Using Framatalk for zero embedding limits
-            2. toLowerCase() prevents mobile auto-capitalization from creating separate rooms
-            3. disableDeepLinking=true stops mobile phones from bouncing users to the app store
-          */}
           <iframe 
             allow="camera; microphone; fullscreen; display-capture; autoplay" 
-            src={`https://framatalk.org/NMICTrack-Portal-${roomName.toLowerCase()}#config.disableDeepLinking=true&config.prejoinPageEnabled=false`} 
+            src={iframeUrl} 
             style={{ height: '100%', width: '100%', border: '0px' }}
             title="Video Meeting"
           ></iframe>
