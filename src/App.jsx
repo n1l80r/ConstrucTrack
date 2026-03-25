@@ -535,10 +535,10 @@ function MeetingsView({ darkMode, user }) {
           </button>
         </div>
         <div className="flex-1 w-full h-full bg-black">
-          {/* Routed through Fairmeeting.net - a privacy-focused open source host with NO embedding limits */}
+          {/* Routed through Framatalk - a stable open-source host with NO embedding limits */}
           <iframe 
             allow="camera; microphone; fullscreen; display-capture; autoplay" 
-            src={`https://fairmeeting.net/NMICTrack-Portal-${roomName}`} 
+            src={`https://framatalk.org/NMICTrack-Portal-${roomName}`} 
             style={{ height: '100%', width: '100%', border: '0px' }}
             title="Video Meeting"
           ></iframe>
@@ -557,7 +557,7 @@ function MeetingsView({ darkMode, user }) {
         <div>
           <h2 className="text-3xl font-bold mb-2">Secure Video Meetings</h2>
           <p className="text-slate-500 max-w-md mx-auto">
-            Join or create a fully-encrypted video conference seamlessly embedded within the portal. You can share your screen, chat, and set a password once inside.
+            Join a fully-encrypted video conference embedded directly within your portal. Zero time limits, zero logins required.
           </p>
         </div>
 
@@ -583,13 +583,13 @@ function MeetingsView({ darkMode, user }) {
 
         <div className="pt-8 border-t border-inherit mt-8 text-xs text-slate-500 flex flex-col items-center justify-center">
           <ShieldCheck size={24} className="mb-2 opacity-50" />
-          <p className="mb-4">Powered securely by Fairmeeting Enterprise infrastructure.</p>
+          <p className="mb-4">Powered by Framasoft Open Source Infrastructure.</p>
           
-          <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-blue-900/20 border-blue-800/50 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+          <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-emerald-900/20 border-emerald-800/50 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
             <strong className="block mb-1 font-bold flex items-center">
-              <Clock size={16} className="mr-1" /> Unlimited Meeting Time
+              <CheckCircle2 size={16} className="mr-1" /> Truly Unlimited Embedding
             </strong>
-            We have routed your portal through a dedicated open-source cooperative server. Your team can meet directly inside this window for as long as needed with absolutely zero time limits, branding warnings, or forced logins!
+            We migrated your portal to a massive European open-source cooperative. This server explicitly allows embedding, meaning you will never see a 5-minute disconnect warning again!
           </div>
         </div>
       </div>
