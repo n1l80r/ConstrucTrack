@@ -513,73 +513,17 @@ export default function App() {
 // --- View Components ---
 
 function MeetingsView({ darkMode, user }) {
-  const [inCall, setInCall] = useState(false);
   const [roomName, setRoomName] = useState("NMIC-Main-Site");
-  const jitsiContainerRef = useRef(null);
 
   const bgStyle = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
   const inputBg = darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900';
 
-  useEffect(() => {
-    let api = null;
-    
-    // Load the official Jitsi External API to bypass iframe security blocks
-    if (inCall && jitsiContainerRef.current) {
-      const loadJitsiScript = () => {
-        if (window.JitsiMeetExternalAPI) {
-          api = new window.JitsiMeetExternalAPI('meet.jit.si', {
-            roomName: `NMICTrack-Portal-${roomName}`,
-            parentNode: jitsiContainerRef.current,
-            width: '100%',
-            height: '100%',
-            userInfo: {
-              displayName: user?.email || 'Portal User'
-            }
-          });
-        }
-      };
-
-      if (!window.JitsiMeetExternalAPI) {
-        const script = document.createElement("script");
-        script.src = "https://meet.jit.si/external_api.js";
-        script.async = true;
-        script.onload = loadJitsiScript;
-        document.body.appendChild(script);
-      } else {
-        loadJitsiScript();
-      }
-    }
-
-    return () => {
-      // Clean up the meeting when the user leaves the tab
-      if (api) api.dispose();
-    };
-  }, [inCall, roomName, user]);
-
-  if (inCall) {
-    return (
-      <div className={`flex flex-col h-[calc(100vh-8rem)] rounded-2xl border ${bgStyle} overflow-hidden relative`}>
-        <div className="flex justify-between items-center p-3 border-b border-inherit bg-slate-950 text-white z-10">
-          <div className="flex items-center space-x-2">
-            <Video size={18} className="text-blue-400" />
-            <span className="font-semibold text-sm">Meeting Room: {roomName}</span>
-            <span className="hidden md:inline-block ml-4 text-[10px] bg-amber-500/20 text-amber-300 px-2 py-1 rounded border border-amber-500/30">
-              Host must log in to unlock unlimited time
-            </span>
-          </div>
-          <button 
-            onClick={() => setInCall(false)} 
-            className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg transition-colors"
-          >
-            Leave Meeting
-          </button>
-        </div>
-        
-        {/* The Jitsi script will securely inject the video player into this div */}
-        <div ref={jitsiContainerRef} className="flex-1 w-full h-full bg-black" />
-      </div>
-    );
-  }
+  const launchMeeting = () => {
+    if (!roomName.trim()) return;
+    const meetingUrl = `https://meet.jit.si/NMICTrack-Portal-${roomName}`;
+    // Open in a new tab so OAuth Logins (Google/Github) are not blocked by iframe security
+    window.open(meetingUrl, '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <div className="max-w-2xl mx-auto mt-10">
@@ -591,7 +535,7 @@ function MeetingsView({ darkMode, user }) {
         <div>
           <h2 className="text-3xl font-bold mb-2">Secure Video Meetings</h2>
           <p className="text-slate-500 max-w-md mx-auto">
-            Join or create a fully-encrypted video conference. You can share your screen, chat, and set a password once inside.
+            Join a fully-encrypted video conference. Meetings launch in a secure external window to allow for secure host authentication.
           </p>
         </div>
 
@@ -606,24 +550,24 @@ function MeetingsView({ darkMode, user }) {
               className={`flex-1 p-3 rounded-xl border focus:ring-2 focus:ring-blue-500 outline-none ${inputBg}`}
             />
             <button 
-              onClick={() => roomName.trim() && setInCall(true)}
+              onClick={launchMeeting}
               disabled={!roomName.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-bold transition-colors"
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-bold transition-colors flex items-center whitespace-nowrap"
             >
-              Join Room
+              Launch <ExternalLink size={18} className="ml-2" />
             </button>
           </div>
         </div>
 
         <div className="pt-8 border-t border-inherit mt-8 text-xs text-slate-500 flex flex-col items-center justify-center">
           <ShieldCheck size={24} className="mb-2 opacity-50" />
-          <p className="mb-4">Powered securely by Jitsi Meet Enterprise. All video and audio is end-to-end encrypted.</p>
+          <p className="mb-4">Powered securely by Jitsi Meet Enterprise.</p>
           
           <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-amber-900/20 border-amber-800/50 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
             <strong className="block mb-1 font-bold flex items-center">
-              <Clock size={16} className="mr-1" /> Bypassing the 5-Minute Limit
+              <AlertCircle size={16} className="mr-1" /> Bypassing the 5-Minute Limit
             </strong>
-            To prevent spam, Jitsi limits anonymous rooms to 5 minutes. For <strong>unlimited meeting time</strong>, the first person in the room must click <strong>"I am the host"</strong> inside the video window and log in with a free Google, GitHub, or Facebook account.
+            To prevent spam, Jitsi limits anonymous rooms to 5 minutes. When the new tab opens, the first person in the room must click <strong>"Wait, I am the host"</strong> and log in with a free Google or GitHub account to unlock unlimited meeting time for everyone!
           </div>
         </div>
       </div>
