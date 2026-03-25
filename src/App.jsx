@@ -9,7 +9,7 @@ import {
   Settings, Bell, Search, Menu, X, Upload, ShieldCheck, 
   Users, HardHat, FileText, ChevronRight, Activity, Clock, 
   CheckCircle2, AlertCircle, Download, Camera, Send, Edit3, Save, Plus, Trash2,
-  Paperclip, AtSign, Loader2, Video
+  Paperclip, AtSign, Loader2, Video, ExternalLink
 } from 'lucide-react';
 
 // --- Firebase Initialization (Using Your Keys) ---
@@ -521,7 +521,7 @@ function MeetingsView({ darkMode, user }) {
   const launchMeeting = () => {
     if (!roomName.trim()) return;
     const meetingUrl = `https://meet.jit.si/NMICTrack-Portal-${roomName}`;
-    // Open in a new tab so OAuth Logins (Google/Github) are not blocked by iframe security
+    // Launch in a new tab! This is the only way to bypass Jitsi's iframe demo blocks.
     window.open(meetingUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -535,7 +535,7 @@ function MeetingsView({ darkMode, user }) {
         <div>
           <h2 className="text-3xl font-bold mb-2">Secure Video Meetings</h2>
           <p className="text-slate-500 max-w-md mx-auto">
-            Join a fully-encrypted video conference. Meetings launch in a secure external window to allow for secure host authentication.
+            Join a fully-encrypted video conference. To bypass embedding limits, meetings will launch securely in a new browser tab.
           </p>
         </div>
 
@@ -554,7 +554,7 @@ function MeetingsView({ darkMode, user }) {
               disabled={!roomName.trim()}
               className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-bold transition-colors flex items-center whitespace-nowrap"
             >
-              Launch <ExternalLink size={18} className="ml-2" />
+              Launch Room <ExternalLink size={18} className="ml-2" />
             </button>
           </div>
         </div>
@@ -565,9 +565,9 @@ function MeetingsView({ darkMode, user }) {
           
           <div className={`p-4 rounded-xl text-left max-w-sm border ${darkMode ? 'bg-amber-900/20 border-amber-800/50 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
             <strong className="block mb-1 font-bold flex items-center">
-              <AlertCircle size={16} className="mr-1" /> Bypassing the 5-Minute Limit
+              <AlertCircle size={16} className="mr-1" /> How to get Unlimited Time
             </strong>
-            To prevent spam, Jitsi limits anonymous rooms to 5 minutes. When the new tab opens, the first person in the room must click <strong>"Wait, I am the host"</strong> and log in with a free Google or GitHub account to unlock unlimited meeting time for everyone!
+            Jitsi limits embedded rooms to 5 minutes to push their paid plans. By launching the room in a <strong>new tab</strong> and clicking <strong>"Wait, I am the host"</strong> to log in (Google/GitHub), you bypass this limit and get unlimited meeting time for free!
           </div>
         </div>
       </div>
